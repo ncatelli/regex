@@ -1,0 +1,17 @@
+[package]
+name = "regex-runtime"
+version = "0.1.0"
+license = "Apache-2.0"
+edition = "2021"
+workspace = ".."
+
+[dev-dependencies]
+criterion = "0.3"
+
+[[bench]]
+name = "linear_scaling_of_input"
+path = "benches/linear.rs"
+harness = false
+
+[dependencies]
+collections-ext = { git = "https://github.com/ncatelli/collections-ext", branch = "main" }

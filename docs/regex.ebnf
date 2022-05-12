@@ -1,0 +1,120 @@
+Regex ::= StartOfStringAnchor? Expression
+
+Expression ::= Subexpression ("|" Expression)?
+
+/* Anything that can be on one side of the alternation. */
+Subexpression ::= SubexpressionItem+
+SubexpressionItem
+	::= Match
+	  | Group
+	  | Anchor
+	  | Backreference
+	
+
+/* Grouping Constructs 
+------------------------------------------------------------------*/
+
+Group ::= "(" GroupNonCapturingModifier? Expression ")" Quantifier?
+GroupNonCapturingModifier ::= "?:"
+
+/* Match
+------------------------------------------------------------------*/
+
+Match ::= MatchItem Quantifier?
+
+MatchItem
+	::= MatchAnyCharacter
+	  | MatchCharacterClass
+	  | MatchCharacter
+
+MatchAnyCharacter ::= "."
+
+MatchCharacterClass
+	::= CharacterGroup
+	  | CharacterClass
+	  | CharacterClassFromUnicodeCategory
+
+MatchCharacter ::= Char
+
+/* Character Classes
+------------------------------------------------------------------*/
+
+CharacterGroup ::= "[" CharacterGroupNegativeModifier? CharacterGroupItem+ "]"
+
+CharacterGroupNegativeModifier ::= "^"
+CharacterGroupItem
+	::= CharacterClass
+	  | CharacterClassFromUnicodeCategory
+	  | CharacterRange
+	  | Char /* excluding ] */
+
+CharacterClass
+	::= CharacterClassAnyWord
+	  | CharacterClassAnyWordInverted
+	  | CharacterClassAnyDecimalDigit
+	  | CharacterClassAnyDecimalDigitInverted
+
+CharacterClassAnyWord ::= "\w"
+CharacterClassAnyWordInverted ::= "\W"
+CharacterClassAnyDecimalDigit ::= "\d"
+CharacterClassAnyDecimalDigitInverted ::= "\D"
+
+CharacterClassFromUnicodeCategory ::= "\p{" UnicodeCategoryName "}"
+UnicodeCategoryName ::= Letters
+
+CharacterRange ::= Char "-" Char
+
+
+/* Quantifiers 
+------------------------------------------------------------------*/
+
+Quantifier ::= QuantifierType LazyModifier?
+QuantifierType
+	::= ZeroOrMoreQuantifier
+	  | OneOrMoreQuantifier
+	  | ZeroOrOneQuantifier
+	  | RangeQuantifier
+
+LazyModifier ::= "?"
+
+ZeroOrMoreQuantifier ::= "*"
+OneOrMoreQuantifier ::= "+"
+ZeroOrOneQuantifier ::= "?"
+
+RangeQuantifier ::= "{" RangeQuantifierLowerBound ( "," RangeQuantifierUpperBound? )? "}"
+RangeQuantifierLowerBound ::= Integer
+RangeQuantifierUpperBound ::= Integer
+
+/* Backreferences
+------------------------------------------------------------------*/
+
+Backreference ::= "\" Integer
+
+/* Anchors
+------------------------------------------------------------------*/
+
+StartOfStringAnchor ::= "^"
+
+Anchor
+	::= AnchorWordBoundary
+	  | AnchorNonWordBoundary
+	  | AnchorStartOfStringOnly
+	  | AnchorEndOfStringOnlyNotNewline
+	  | AnchorEndOfStringOnly
+	  | AnchorPreviousMatchEnd
+	  | AnchorEndOfString
+
+AnchorWordBoundary ::= "\b"
+AnchorNonWordBoundary ::= "\B"
+AnchorStartOfStringOnly ::= "\A"
+AnchorEndOfStringOnlyNotNewline ::= "\z"
+AnchorEndOfStringOnly ::= "\Z"
+AnchorPreviousMatchEnd ::= "\G"
+AnchorEndOfString ::= "$"
+
+/* Misc
+------------------------------------------------------------------*/
+
+Integer ::= [0-9]+
+Letters ::= [a-zA-Z]+
+Char ::= #x9 | #xA | #xD | [#x20-#xD7FF] | [#xE000-#xFFFD] | [#x10000-#x10FFFF]

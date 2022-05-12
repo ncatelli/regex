@@ -1,0 +1,29 @@
+
+name: Bench
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  release:
+    types:
+      - created
+
+jobs:
+  build_and_test:
+    name: Bench
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          clean: false
+      - name: measure benchmarks on branch
+        uses: actions-rs/cargo@v1
+        with:
+          command: bench
+      - name: upload benchmark report
+        uses: actions/upload-artifact@v1
+        with:
+          name: Benchmark report
+          path: target/criterion/

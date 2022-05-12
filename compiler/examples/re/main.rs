@@ -2,7 +2,7 @@ use std::io::{self, BufRead};
 
 use regex_compiler::{compile, parse};
 
-const USAGE: &str = "grep-analog PATTERN [FILE]";
+const USAGE: &str = "re PATTERN [FILE]";
 
 fn main() -> Result<(), String> {
     let (debug, args) = std::env::args()

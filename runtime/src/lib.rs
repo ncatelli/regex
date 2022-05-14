@@ -583,7 +583,6 @@ fn add_thread<const SG: usize>(
     mut thread_list: Threads<SG>,
     t: Thread<SG>,
     sp: usize,
-    input: &str,
 ) -> Threads<SG> {
     let inst_idx = t.inst;
     let default_next_inst_idx = inst_idx + 1;
@@ -612,7 +611,6 @@ fn add_thread<const SG: usize>(
                 thread_list,
                 Thread::new(t.save_groups, x),
                 sp,
-                input,
             );
 
             add_thread(
@@ -621,7 +619,6 @@ fn add_thread<const SG: usize>(
                 thread_list,
                 Thread::new(t.save_groups, y),
                 sp,
-                input,
             )
         }
         Opcode::Jmp(InstJmp { next }) => add_thread(
@@ -630,7 +627,6 @@ fn add_thread<const SG: usize>(
             thread_list,
             Thread::new(t.save_groups, *next),
             sp,
-            input,
         ),
         Opcode::StartSave(InstStartSave { slot_id }) => {
             let mut groups = t.save_groups;
@@ -642,7 +638,6 @@ fn add_thread<const SG: usize>(
                 thread_list,
                 Thread::new(groups, default_next_inst_idx),
                 sp,
-                input,
             )
         }
         Opcode::EndSave(InstEndSave { slot_id }) => {
@@ -669,7 +664,6 @@ fn add_thread<const SG: usize>(
                 thread_list,
                 Thread::new(thread_save_group, next),
                 sp,
-                input,
             )
         }
         _ => {
@@ -705,7 +699,6 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
         current_thread_list,
         Thread::new([SaveGroup::None; SG], InstIndex::from(0)),
         input_idx,
-        input,
     );
 
     'outer: while input_idx <= input_len {
@@ -730,7 +723,6 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
                         next_thread_list,
                         Thread::new(thread_local_save_group, default_next_inst_idx),
                         input_idx + next_char_size_in_bytes,
-                        input,
                     );
                 }
 
@@ -751,7 +743,6 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
                         next_thread_list,
                         Thread::new(thread_local_save_group, default_next_inst_idx),
                         input_idx + next_char_size_in_bytes,
-                        input,
                     );
                 }
 
@@ -776,7 +767,6 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
                         next_thread_list,
                         Thread::<SG>::new(thread_local_save_group, default_next_inst_idx),
                         input_idx + next_char_size_in_bytes,
-                        input,
                     );
                 }
 

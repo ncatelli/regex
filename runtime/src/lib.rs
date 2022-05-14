@@ -574,7 +574,7 @@ impl Display for InstEndSave {
 }
 
 /// This attempts to fetch a valid unicode character at an index. If the index
-/// falls within a unicode character boundary, it will back track up to 4 bytes
+/// falls within a unicode character boundary, it will back track up to 3 bytes
 /// to look for the boundary.
 fn get_at_char_boundary(input: &str, idx: usize) -> Option<char> {
     match input.get(idx..) {

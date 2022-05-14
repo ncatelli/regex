@@ -581,9 +581,8 @@ fn get_at_char_boundary(input: &str, idx: usize) -> Option<char> {
         Some(c) => c.chars().next(),
         None => {
             let bottom_boundary = idx.saturating_sub(3);
-            let top_boundary = idx.saturating_sub(1);
 
-            for backtracking_idx in (bottom_boundary..=top_boundary).rev() {
+            for backtracking_idx in (bottom_boundary..idx).rev() {
                 match input.get(backtracking_idx..) {
                     Some(c) => return c.chars().next(),
                     None => continue,

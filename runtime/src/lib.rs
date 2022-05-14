@@ -573,25 +573,8 @@ impl Display for InstEndSave {
     }
 }
 
-/// This attempts to fetch a valid unicode character at an index. If the index
-/// falls within a unicode character boundary, it will back track up to 3 bytes
-/// to look for the boundary.
 fn get_at_char_boundary(input: &str, idx: usize) -> Option<char> {
-    match input.get(idx..) {
-        Some(c) => c.chars().next(),
-        None => {
-            let bottom_boundary = idx.saturating_sub(3);
-
-            for backtracking_idx in (bottom_boundary..idx).rev() {
-                match input.get(backtracking_idx..) {
-                    Some(c) => return c.chars().next(),
-                    None => continue,
-                }
-            }
-
-            None
-        }
-    }
+    input.get(idx..).and_then(|sub_str| sub_str.chars().next())
 }
 
 fn add_thread<const SG: usize>(

@@ -573,8 +573,25 @@ impl Display for InstEndSave {
     }
 }
 
-fn get_at(input: &str, idx: usize) -> Option<char> {
-    input[idx..].chars().next()
+/// This attempts to fetch a valid unicode character at an index. If the index
+/// falls within a unicode character boundary, it will back track up to 3 bytes
+/// to look for the boundary.
+fn get_at_char_boundary(input: &str, idx: usize) -> Option<char> {
+    match input.get(idx..) {
+        Some(c) => c.chars().next(),
+        None => {
+            let bottom_boundary = idx.saturating_sub(3);
+
+            for backtracking_idx in (bottom_boundary..idx).rev() {
+                match input.get(backtracking_idx..) {
+                    Some(c) => return c.chars().next(),
+                    None => continue,
+                }
+            }
+
+            None
+        }
+    }
 }
 
 fn add_thread<const SG: usize>(
@@ -711,7 +728,8 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
     'outer: while input_idx <= input_len {
         for thread in current_thread_list.threads.iter() {
             let thread_save_groups = thread.save_groups;
-            let next_char = get_at(input, input_idx);
+            let next_char = get_at_char_boundary(input, input_idx);
+            let next_char_size_in_bytes = next_char.map_or(0, |c| c.len_utf8());
             let inst_idx = thread.inst;
             let default_next_inst_idx = inst_idx + 1;
             let opcode = instructions.get(inst_idx.as_usize()).map(|i| &i.opcode);
@@ -728,7 +746,7 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
                         &mut sub,
                         next_thread_list,
                         Thread::new(thread_local_save_group, default_next_inst_idx),
-                        input_idx + 1,
+                        input_idx + next_char_size_in_bytes,
                         input,
                     );
                 }
@@ -749,7 +767,7 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
                         &mut sub,
                         next_thread_list,
                         Thread::new(thread_local_save_group, default_next_inst_idx),
-                        input_idx + 1,
+                        input_idx + next_char_size_in_bytes,
                         input,
                     );
                 }
@@ -774,7 +792,7 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
                         &mut sub,
                         next_thread_list,
                         Thread::<SG>::new(thread_local_save_group, default_next_inst_idx),
-                        input_idx + 1,
+                        input_idx + next_char_size_in_bytes,
                         input,
                     );
                 }
@@ -790,7 +808,9 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
             }
         }
 
-        input_idx += 1;
+        let bytes_to_next_char_boundary =
+            get_at_char_boundary(input, input_idx).map_or(0, |c| c.len_utf8());
+        input_idx += bytes_to_next_char_boundary;
         swap(&mut current_thread_list, &mut next_thread_list);
         next_thread_list.threads.clear();
         next_thread_list.gen.clear();
@@ -1265,5 +1285,26 @@ mod tests {
 0003: Match\n",
             prog.to_string()
         )
+    }
+
+    #[test]
+    fn should_correctly_handle_indexing_over_unicode() {
+        // (b)
+        let (expected_res, prog) = (
+            [SaveGroupSlot::complete(2, 3)],
+            Instructions::default().with_opcodes(vec![
+                Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
+                Opcode::Any,
+                Opcode::StartSave(InstStartSave::new(0)),
+                Opcode::Consume(InstConsume::new('b')),
+                Opcode::EndSave(InstEndSave::new(0)),
+                Opcode::Match,
+            ]),
+        );
+
+        let input = "\u{00A0}b";
+
+        let res = run::<1>(&prog, input);
+        assert_eq!(Some(expected_res), res)
     }
 }

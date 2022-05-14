@@ -588,6 +588,7 @@ fn get_at_char_boundary(input: &str, idx: usize) -> Option<char> {
                     None => continue,
                 }
             }
+
             None
         }
     }

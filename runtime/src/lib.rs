@@ -808,7 +808,9 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
             }
         }
 
-        input_idx += get_at_char_boundary(input, input_idx).map_or(0, |c| c.len_utf8());
+        let bytes_to_next_char_boundary =
+            get_at_char_boundary(input, input_idx).map_or(0, |c| c.len_utf8());
+        input_idx += bytes_to_next_char_boundary;
         swap(&mut current_thread_list, &mut next_thread_list);
         next_thread_list.threads.clear();
         next_thread_list.gen.clear();

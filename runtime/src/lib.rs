@@ -573,24 +573,40 @@ impl Display for InstEndSave {
     }
 }
 
-/// This attempts to fetch a valid unicode character at an index. If the index
-/// falls within a unicode character boundary, it will back track up to 3 bytes
-/// to look for the boundary.
-fn get_at_char_boundary(input: &str, idx: usize) -> Option<char> {
-    match input.get(idx..) {
-        Some(c) => c.chars().next(),
-        None => {
-            let bottom_boundary = idx.saturating_sub(3);
+/// An iterator over the Chars in an input str that tracks it's byte position
+/// in the input.
+struct CharsWithBytePosition<'a> {
+    pub front_offset_in_bytes: usize,
+    iter: std::str::Chars<'a>,
+}
 
-            for backtracking_idx in (bottom_boundary..idx).rev() {
-                match input.get(backtracking_idx..) {
-                    Some(c) => return c.chars().next(),
-                    None => continue,
-                }
-            }
-
-            None
+impl<'a> CharsWithBytePosition<'a> {
+    fn new(input: &'a str) -> Self {
+        Self {
+            front_offset_in_bytes: 0,
+            iter: input.chars(),
         }
+    }
+}
+
+impl<'a> Iterator for CharsWithBytePosition<'a> {
+    type Item = char;
+
+    #[inline]
+    fn next(&mut self) -> Option<char> {
+        match self.iter.next() {
+            None => None,
+            Some(c) => {
+                self.front_offset_in_bytes += c.len_utf8();
+                Some(c)
+            }
+        }
+    }
+}
+
+impl<'a> From<&'a str> for CharsWithBytePosition<'a> {
+    fn from(input: &'a str) -> Self {
+        Self::new(input)
     }
 }
 
@@ -600,7 +616,6 @@ fn add_thread<const SG: usize>(
     mut thread_list: Threads<SG>,
     t: Thread<SG>,
     sp: usize,
-    input: &str,
 ) -> Threads<SG> {
     let inst_idx = t.inst;
     let default_next_inst_idx = inst_idx + 1;
@@ -629,7 +644,6 @@ fn add_thread<const SG: usize>(
                 thread_list,
                 Thread::new(t.save_groups, x),
                 sp,
-                input,
             );
 
             add_thread(
@@ -638,7 +652,6 @@ fn add_thread<const SG: usize>(
                 thread_list,
                 Thread::new(t.save_groups, y),
                 sp,
-                input,
             )
         }
         Opcode::Jmp(InstJmp { next }) => add_thread(
@@ -647,7 +660,6 @@ fn add_thread<const SG: usize>(
             thread_list,
             Thread::new(t.save_groups, *next),
             sp,
-            input,
         ),
         Opcode::StartSave(InstStartSave { slot_id }) => {
             let mut groups = t.save_groups;
@@ -659,7 +671,6 @@ fn add_thread<const SG: usize>(
                 thread_list,
                 Thread::new(groups, default_next_inst_idx),
                 sp,
-                input,
             )
         }
         Opcode::EndSave(InstEndSave { slot_id }) => {
@@ -686,7 +697,6 @@ fn add_thread<const SG: usize>(
                 thread_list,
                 Thread::new(thread_save_group, next),
                 sp,
-                input,
             )
         }
         _ => {
@@ -705,15 +715,16 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
     let sets = &program.sets;
     let instructions = program.as_ref();
 
-    let input_len = input.len();
-    let program_len = instructions.len();
-
+    let input_len_in_bytes = input.len();
     let mut input_idx = 0;
+    let mut input_iter = CharsWithBytePosition::new(input);
+
+    let program_len = instructions.len();
     let mut current_thread_list = Threads::with_set_size(program_len);
     let mut next_thread_list = Threads::with_set_size(program_len);
+
     // a running tracker of found matches
     let mut matches = 0;
-
     let mut sub = [SaveGroupSlot::None; SG];
 
     current_thread_list = add_thread(
@@ -721,15 +732,14 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
         &mut sub,
         current_thread_list,
         Thread::new([SaveGroup::None; SG], InstIndex::from(0)),
-        input_idx,
-        input,
+        0,
     );
 
-    'outer: while input_idx <= input_len {
+    'outer: while input_iter.front_offset_in_bytes <= input_len_in_bytes {
+        let next_char = input_iter.next();
+
         for thread in current_thread_list.threads.iter() {
             let thread_save_groups = thread.save_groups;
-            let next_char = get_at_char_boundary(input, input_idx);
-            let next_char_size_in_bytes = next_char.map_or(0, |c| c.len_utf8());
             let inst_idx = thread.inst;
             let default_next_inst_idx = inst_idx + 1;
             let opcode = instructions.get(inst_idx.as_usize()).map(|i| &i.opcode);
@@ -746,8 +756,7 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
                         &mut sub,
                         next_thread_list,
                         Thread::new(thread_local_save_group, default_next_inst_idx),
-                        input_idx + next_char_size_in_bytes,
-                        input,
+                        input_idx + 1,
                     );
                 }
 
@@ -767,8 +776,7 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
                         &mut sub,
                         next_thread_list,
                         Thread::new(thread_local_save_group, default_next_inst_idx),
-                        input_idx + next_char_size_in_bytes,
-                        input,
+                        input_idx + 1,
                     );
                 }
 
@@ -792,8 +800,7 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
                         &mut sub,
                         next_thread_list,
                         Thread::<SG>::new(thread_local_save_group, default_next_inst_idx),
-                        input_idx + next_char_size_in_bytes,
-                        input,
+                        input_idx + 1,
                     );
                 }
 
@@ -808,9 +815,7 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
             }
         }
 
-        let bytes_to_next_char_boundary =
-            get_at_char_boundary(input, input_idx).map_or(0, |c| c.len_utf8());
-        input_idx += bytes_to_next_char_boundary;
+        input_idx += 1;
         swap(&mut current_thread_list, &mut next_thread_list);
         next_thread_list.threads.clear();
         next_thread_list.gen.clear();
@@ -1291,7 +1296,7 @@ mod tests {
     fn should_correctly_handle_indexing_over_unicode() {
         // (b)
         let (expected_res, prog) = (
-            [SaveGroupSlot::complete(2, 3)],
+            [SaveGroupSlot::complete(1, 2)],
             Instructions::default().with_opcodes(vec![
                 Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
                 Opcode::Any,

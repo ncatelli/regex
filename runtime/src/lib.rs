@@ -573,8 +573,17 @@ impl Display for InstEndSave {
     }
 }
 
-fn get_at(input: &str, idx: usize) -> Option<char> {
-    input[..].chars().nth(idx)
+fn get_at_boundary(input: &str, idx: usize) -> Option<char> {
+    let bottom_boundary = if idx >= 3 { idx - 3 } else { 0 };
+
+    for backtracking_idx in (bottom_boundary..=idx).rev() {
+        match input.get(backtracking_idx..) {
+            Some(c) => return c.chars().next(),
+            None => continue,
+        };
+    }
+
+    None
 }
 
 fn add_thread<const SG: usize>(
@@ -711,7 +720,7 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
     'outer: while input_idx <= input_len {
         for thread in current_thread_list.threads.iter() {
             let thread_save_groups = thread.save_groups;
-            let next_char = get_at(input, input_idx);
+            let next_char = get_at_boundary(input, input_idx);
             let inst_idx = thread.inst;
             let default_next_inst_idx = inst_idx + 1;
             let opcode = instructions.get(inst_idx.as_usize()).map(|i| &i.opcode);

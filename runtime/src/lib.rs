@@ -574,7 +574,7 @@ impl Display for InstEndSave {
 }
 
 fn get_at(input: &str, idx: usize) -> Option<char> {
-    input[idx..].chars().next()
+    input[..].chars().nth(idx)
 }
 
 fn add_thread<const SG: usize>(

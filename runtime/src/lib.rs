@@ -307,6 +307,24 @@ pub enum Opcode {
     Match,
 }
 
+impl Opcode {
+    /// Returns true if the opcode represents an input consuming operations.
+    #[allow(unused)]
+    pub fn is_consuming(&self) -> bool {
+        matches!(
+            self,
+            Opcode::Any | Opcode::Consume(_) | Opcode::ConsumeSet(_)
+        )
+    }
+
+    /// Returns true if the opcode represents an input consuming operations
+    /// that represents an explicit value or alphabet.
+    #[allow(unused)]
+    pub fn is_explicit_consuming(&self) -> bool {
+        matches!(self, Opcode::Consume(_) | Opcode::ConsumeSet(_))
+    }
+}
+
 impl Display for Opcode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -354,7 +372,7 @@ impl Display for InstAny {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstConsume {
-    value: char,
+    pub value: char,
 }
 
 impl InstConsume {

@@ -123,10 +123,24 @@ impl<const SG: usize> Default for Threads<SG> {
     }
 }
 
+#[derive(Debug, PartialEq)]
+pub enum FastForward {
+    Char(char),
+    Set(CharacterSet),
+    None,
+}
+
+impl Default for FastForward {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
 #[derive(Default, Debug, PartialEq)]
 pub struct Instructions {
     sets: Vec<CharacterSet>,
     program: Vec<Instruction>,
+    fast_forward: FastForward,
 }
 
 impl Instructions {
@@ -139,6 +153,7 @@ impl Instructions {
                 .enumerate()
                 .map(|(id, opcode)| Instruction::new(id, opcode))
                 .collect(),
+            fast_forward: FastForward::None,
         }
     }
 
@@ -150,6 +165,7 @@ impl Instructions {
                 .enumerate()
                 .map(|(id, opcode)| Instruction::new(id, opcode))
                 .collect(),
+            fast_forward: self.fast_forward,
         }
     }
 
@@ -157,6 +173,7 @@ impl Instructions {
         Self {
             sets: self.sets,
             program,
+            fast_forward: self.fast_forward,
         }
     }
 
@@ -164,6 +181,15 @@ impl Instructions {
         Self {
             sets,
             program: self.program,
+            fast_forward: self.fast_forward,
+        }
+    }
+
+    pub fn with_fast_forward(self, fast_forward: FastForward) -> Self {
+        Self {
+            sets: self.sets,
+            program: self.program,
+            fast_forward,
         }
     }
 
@@ -573,43 +599,6 @@ impl Display for InstEndSave {
     }
 }
 
-/// An iterator over the Chars in an input str that tracks it's byte position
-/// in the input.
-struct CharsWithBytePosition<'a> {
-    pub front_offset_in_bytes: usize,
-    iter: std::str::Chars<'a>,
-}
-
-impl<'a> CharsWithBytePosition<'a> {
-    fn new(input: &'a str) -> Self {
-        Self {
-            front_offset_in_bytes: 0,
-            iter: input.chars(),
-        }
-    }
-}
-
-impl<'a> Iterator for CharsWithBytePosition<'a> {
-    type Item = char;
-
-    #[inline]
-    fn next(&mut self) -> Option<char> {
-        match self.iter.next() {
-            None => None,
-            Some(c) => {
-                self.front_offset_in_bytes += c.len_utf8();
-                Some(c)
-            }
-        }
-    }
-}
-
-impl<'a> From<&'a str> for CharsWithBytePosition<'a> {
-    fn from(input: &'a str) -> Self {
-        Self::new(input)
-    }
-}
-
 fn add_thread<const SG: usize>(
     program: &[Instruction],
     save_groups: &mut [SaveGroupSlot; SG],
@@ -715,9 +704,8 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
     let sets = &program.sets;
     let instructions = program.as_ref();
 
-    let input_len_in_bytes = input.len();
     let mut input_idx = 0;
-    let mut input_iter = CharsWithBytePosition::new(input);
+    let mut input_iter = input.chars();
 
     let program_len = instructions.len();
     let mut current_thread_list = Threads::with_set_size(program_len);
@@ -735,8 +723,10 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
         0,
     );
 
-    'outer: while input_iter.front_offset_in_bytes <= input_len_in_bytes {
+    let mut done = false;
+    'outer: while !done {
         let next_char = input_iter.next();
+        done = next_char.is_none();
 
         for thread in current_thread_list.threads.iter() {
             let thread_save_groups = thread.save_groups;

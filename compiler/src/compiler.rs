@@ -75,24 +75,28 @@ type RelativeOpcodes = Vec<RelativeOpcode>;
 pub fn compile(regex_ast: ast::Regex) -> Result<Instructions, String> {
     let suffix = [RelativeOpcode::Match];
 
-    let relative_ops: Result<RelativeOpcodes, _> = match regex_ast {
-        ast::Regex::StartOfStringAnchored(expr) => {
-            expression(expr).map(|expr| expr.into_iter().chain(suffix.into_iter()).collect())
-        }
-        ast::Regex::Unanchored(expr) => expression(expr).map(|expr| {
-            // match anything
-            let prefix = [
-                RelativeOpcode::Split(3, 1),
-                RelativeOpcode::Any,
-                RelativeOpcode::Jmp(-2),
-            ];
+    let (anchored, relative_ops): (bool, Result<RelativeOpcodes, _>) = match regex_ast {
+        ast::Regex::StartOfStringAnchored(expr) => (
+            true,
+            expression(expr).map(|expr| expr.into_iter().chain(suffix.into_iter()).collect()),
+        ),
+        ast::Regex::Unanchored(expr) => (
+            false,
+            expression(expr).map(|expr| {
+                // match anything
+                let prefix = [
+                    RelativeOpcode::Split(3, 1),
+                    RelativeOpcode::Any,
+                    RelativeOpcode::Jmp(-2),
+                ];
 
-            prefix
-                .into_iter()
-                .chain(expr.into_iter())
-                .chain(suffix.into_iter())
-                .collect()
-        }),
+                prefix
+                    .into_iter()
+                    .chain(expr.into_iter())
+                    .chain(suffix.into_iter())
+                    .collect()
+            }),
+        ),
     };
 
     relative_ops
@@ -111,7 +115,24 @@ pub fn compile(regex_ast: ast::Regex) -> Result<Instructions, String> {
 
             (sets, absolute_insts)
         })
-        .map(|(sets, insts)| Instructions::new(sets, insts))
+        .map(|(sets, insts)| {
+            let first_consuming = (insts)
+                .iter()
+                .find(|opcode| opcode.is_explicit_consuming())
+                .cloned();
+
+            match (anchored, first_consuming) {
+                (false, Some(Opcode::Consume(InstConsume { value }))) => {
+                    Instructions::new(sets, insts).with_fast_forward(FastForward::Char(value))
+                }
+                (false, Some(Opcode::ConsumeSet(InstConsumeSet { idx }))) => {
+                    let ff_set = sets[idx].clone();
+                    Instructions::new(sets, insts).with_fast_forward(FastForward::Set(ff_set))
+                }
+                // catch-all
+                (false, None) | (false, Some(_)) | (true, _) => Instructions::new(sets, insts),
+            }
+        })
 }
 
 fn expression(expr: ast::Expression) -> Result<RelativeOpcodes, String> {
@@ -749,14 +770,16 @@ mod tests {
         ])]));
 
         assert_eq!(
-            Ok(Instructions::default().with_opcodes(vec![
-                Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
-                Opcode::Any,
-                Opcode::Jmp(InstJmp::new(InstIndex::from(0))),
-                Opcode::Consume(InstConsume::new('a')),
-                Opcode::Consume(InstConsume::new('b')),
-                Opcode::Match,
-            ])),
+            Ok(Instructions::default()
+                .with_opcodes(vec![
+                    Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
+                    Opcode::Any,
+                    Opcode::Jmp(InstJmp::new(InstIndex::from(0))),
+                    Opcode::Consume(InstConsume::new('a')),
+                    Opcode::Consume(InstConsume::new('b')),
+                    Opcode::Match,
+                ])
+                .with_fast_forward(FastForward::Char('a'))),
             compile(regex_ast)
         )
     }

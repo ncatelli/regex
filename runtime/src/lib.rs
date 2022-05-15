@@ -123,10 +123,24 @@ impl<const SG: usize> Default for Threads<SG> {
     }
 }
 
+#[derive(Debug, PartialEq)]
+pub enum FastForward {
+    Char(char),
+    Set(CharacterSet),
+    None,
+}
+
+impl Default for FastForward {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
 #[derive(Default, Debug, PartialEq)]
 pub struct Instructions {
     sets: Vec<CharacterSet>,
     program: Vec<Instruction>,
+    fast_forward: FastForward,
 }
 
 impl Instructions {
@@ -139,6 +153,7 @@ impl Instructions {
                 .enumerate()
                 .map(|(id, opcode)| Instruction::new(id, opcode))
                 .collect(),
+            fast_forward: FastForward::None,
         }
     }
 
@@ -150,6 +165,7 @@ impl Instructions {
                 .enumerate()
                 .map(|(id, opcode)| Instruction::new(id, opcode))
                 .collect(),
+            fast_forward: self.fast_forward,
         }
     }
 
@@ -157,6 +173,7 @@ impl Instructions {
         Self {
             sets: self.sets,
             program,
+            fast_forward: self.fast_forward,
         }
     }
 
@@ -164,6 +181,15 @@ impl Instructions {
         Self {
             sets,
             program: self.program,
+            fast_forward: self.fast_forward,
+        }
+    }
+
+    pub fn with_fast_forward(self, fast_forward: FastForward) -> Self {
+        Self {
+            sets: self.sets,
+            program: self.program,
+            fast_forward,
         }
     }
 
@@ -281,6 +307,24 @@ pub enum Opcode {
     Match,
 }
 
+impl Opcode {
+    /// Returns true if the opcode represents an input consuming operations.
+    #[allow(unused)]
+    pub fn is_consuming(&self) -> bool {
+        matches!(
+            self,
+            Opcode::Any | Opcode::Consume(_) | Opcode::ConsumeSet(_)
+        )
+    }
+
+    /// Returns true if the opcode represents an input consuming operations
+    /// that represents an explicit value or alphabet.
+    #[allow(unused)]
+    pub fn is_explicit_consuming(&self) -> bool {
+        matches!(self, Opcode::Consume(_) | Opcode::ConsumeSet(_))
+    }
+}
+
 impl Display for Opcode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -328,7 +372,7 @@ impl Display for InstAny {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstConsume {
-    value: char,
+    pub value: char,
 }
 
 impl InstConsume {
@@ -573,43 +617,6 @@ impl Display for InstEndSave {
     }
 }
 
-/// An iterator over the Chars in an input str that tracks it's byte position
-/// in the input.
-struct CharsWithBytePosition<'a> {
-    pub front_offset_in_bytes: usize,
-    iter: std::str::Chars<'a>,
-}
-
-impl<'a> CharsWithBytePosition<'a> {
-    fn new(input: &'a str) -> Self {
-        Self {
-            front_offset_in_bytes: 0,
-            iter: input.chars(),
-        }
-    }
-}
-
-impl<'a> Iterator for CharsWithBytePosition<'a> {
-    type Item = char;
-
-    #[inline]
-    fn next(&mut self) -> Option<char> {
-        match self.iter.next() {
-            None => None,
-            Some(c) => {
-                self.front_offset_in_bytes += c.len_utf8();
-                Some(c)
-            }
-        }
-    }
-}
-
-impl<'a> From<&'a str> for CharsWithBytePosition<'a> {
-    fn from(input: &'a str) -> Self {
-        Self::new(input)
-    }
-}
-
 fn add_thread<const SG: usize>(
     program: &[Instruction],
     save_groups: &mut [SaveGroupSlot; SG],
@@ -712,12 +719,19 @@ fn add_thread<const SG: usize>(
 pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[SaveGroupSlot; SG]> {
     use core::mem::swap;
 
+    let mut input_idx = 0;
+    let mut input_iter =
+        input
+            .chars()
+            .enumerate()
+            .skip_while(|(_, c)| match &program.fast_forward {
+                FastForward::None => false,
+                FastForward::Char(first_match) => *c != *first_match,
+                FastForward::Set(first_match) => first_match.not_in_set(*c),
+            });
+
     let sets = &program.sets;
     let instructions = program.as_ref();
-
-    let input_len_in_bytes = input.len();
-    let mut input_idx = 0;
-    let mut input_iter = CharsWithBytePosition::new(input);
 
     let program_len = instructions.len();
     let mut current_thread_list = Threads::with_set_size(program_len);
@@ -735,8 +749,15 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
         0,
     );
 
-    'outer: while input_iter.front_offset_in_bytes <= input_len_in_bytes {
-        let next_char = input_iter.next();
+    let mut done = false;
+    'outer: while !done && !current_thread_list.threads.is_empty() {
+        let next_char = if let Some((idx, next)) = input_iter.next() {
+            input_idx = idx;
+            Some(next)
+        } else {
+            done = true;
+            None
+        };
 
         for thread in current_thread_list.threads.iter() {
             let thread_save_groups = thread.save_groups;
@@ -815,14 +836,9 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
             }
         }
 
-        input_idx += 1;
         swap(&mut current_thread_list, &mut next_thread_list);
         next_thread_list.threads.clear();
         next_thread_list.gen.clear();
-
-        if current_thread_list.threads.is_empty() {
-            break 'outer;
-        }
     }
 
     // Signifies all savegroups are satisfied
@@ -1300,6 +1316,7 @@ mod tests {
             Instructions::default().with_opcodes(vec![
                 Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
                 Opcode::Any,
+                Opcode::Jmp(InstJmp::new(InstIndex::from(0))),
                 Opcode::StartSave(InstStartSave::new(0)),
                 Opcode::Consume(InstConsume::new('b')),
                 Opcode::EndSave(InstEndSave::new(0)),
@@ -1308,6 +1325,30 @@ mod tests {
         );
 
         let input = "\u{00A0}b";
+
+        let res = run::<1>(&prog, input);
+        assert_eq!(Some(expected_res), res)
+    }
+
+    #[test]
+    fn should_handle_fast_forwarding_match() {
+        // (d)
+        let (expected_res, prog) = (
+            [SaveGroupSlot::complete(3, 4)],
+            Instructions::default()
+                .with_opcodes(vec![
+                    Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
+                    Opcode::Any,
+                    Opcode::Jmp(InstJmp::new(InstIndex::from(0))),
+                    Opcode::StartSave(InstStartSave::new(0)),
+                    Opcode::Consume(InstConsume::new('d')),
+                    Opcode::EndSave(InstEndSave::new(0)),
+                    Opcode::Match,
+                ])
+                .with_fast_forward(FastForward::Char('d')),
+        );
+
+        let input = "abcd";
 
         let res = run::<1>(&prog, input);
         assert_eq!(Some(expected_res), res)

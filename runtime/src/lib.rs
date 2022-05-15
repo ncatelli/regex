@@ -701,11 +701,19 @@ fn add_thread<const SG: usize>(
 pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[SaveGroupSlot; SG]> {
     use core::mem::swap;
 
+    let mut input_idx = 0;
+    let mut input_iter =
+        input
+            .chars()
+            .enumerate()
+            .skip_while(|(_, c)| match &program.fast_forward {
+                FastForward::None => false,
+                FastForward::Char(first_match) => *c != *first_match,
+                FastForward::Set(first_match) => first_match.not_in_set(*c),
+            });
+
     let sets = &program.sets;
     let instructions = program.as_ref();
-
-    let mut input_idx = 0;
-    let mut input_iter = input.chars();
 
     let program_len = instructions.len();
     let mut current_thread_list = Threads::with_set_size(program_len);
@@ -724,9 +732,14 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
     );
 
     let mut done = false;
-    'outer: while !done {
-        let next_char = input_iter.next();
-        done = next_char.is_none();
+    'outer: while !done && !current_thread_list.threads.is_empty() {
+        let next_char = if let Some((idx, next)) = input_iter.next() {
+            input_idx = idx;
+            Some(next)
+        } else {
+            done = true;
+            None
+        };
 
         for thread in current_thread_list.threads.iter() {
             let thread_save_groups = thread.save_groups;
@@ -805,14 +818,9 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
             }
         }
 
-        input_idx += 1;
         swap(&mut current_thread_list, &mut next_thread_list);
         next_thread_list.threads.clear();
         next_thread_list.gen.clear();
-
-        if current_thread_list.threads.is_empty() {
-            break 'outer;
-        }
     }
 
     // Signifies all savegroups are satisfied
@@ -1290,6 +1298,7 @@ mod tests {
             Instructions::default().with_opcodes(vec![
                 Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
                 Opcode::Any,
+                Opcode::Jmp(InstJmp::new(InstIndex::from(0))),
                 Opcode::StartSave(InstStartSave::new(0)),
                 Opcode::Consume(InstConsume::new('b')),
                 Opcode::EndSave(InstEndSave::new(0)),
@@ -1298,6 +1307,30 @@ mod tests {
         );
 
         let input = "\u{00A0}b";
+
+        let res = run::<1>(&prog, input);
+        assert_eq!(Some(expected_res), res)
+    }
+
+    #[test]
+    fn should_handle_fast_forwarding_match() {
+        // (d)
+        let (expected_res, prog) = (
+            [SaveGroupSlot::complete(3, 4)],
+            Instructions::default()
+                .with_opcodes(vec![
+                    Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
+                    Opcode::Any,
+                    Opcode::Jmp(InstJmp::new(InstIndex::from(0))),
+                    Opcode::StartSave(InstStartSave::new(0)),
+                    Opcode::Consume(InstConsume::new('d')),
+                    Opcode::EndSave(InstEndSave::new(0)),
+                    Opcode::Match,
+                ])
+                .with_fast_forward(FastForward::Char('d')),
+        );
+
+        let input = "abcd";
 
         let res = run::<1>(&prog, input);
         assert_eq!(Some(expected_res), res)

@@ -304,14 +304,44 @@ impl std::ops::Add<Self> for InstIndex {
 
 #[derive(Debug, PartialEq)]
 pub struct Instruction {
-    id: usize,
-    opcode: Opcode,
+    // A unique identifier for a given instruction
+    pub id: usize,
+    pub opcode: Opcode,
 }
 
 impl Instruction {
     #[must_use]
     pub fn new(id: usize, opcode: Opcode) -> Self {
         Self { id, opcode }
+    }
+
+    /// Returns a tuple representation of all composing parts of the instruction.
+    pub fn into_raw_parts(self) -> (usize, Opcode) {
+        self.into()
+    }
+
+    /// Functionally equivalent to `Self::new` generating an instruction from
+    /// its constituent parts.
+    pub fn from_raw_parts(id: usize, opcode: Opcode) -> Self {
+        Self::new(id, opcode)
+    }
+}
+
+impl AsRef<Opcode> for Instruction {
+    fn as_ref(&self) -> &Opcode {
+        &self.opcode
+    }
+}
+
+impl From<Instruction> for (usize, Opcode) {
+    fn from(inst: Instruction) -> Self {
+        (inst.id, inst.opcode)
+    }
+}
+
+impl From<(usize, Opcode)> for Instruction {
+    fn from((id, opcode): (usize, Opcode)) -> Self {
+        Self::from_raw_parts(id, opcode)
     }
 }
 

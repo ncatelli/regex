@@ -315,6 +315,11 @@ impl Instruction {
         Self { id, opcode }
     }
 
+    /// Returns the Instruction's enclosed Opcode.
+    pub fn into_opcode(self) -> Opcode {
+        self.opcode
+    }
+
     /// Returns a tuple representation of all composing parts of the instruction.
     pub fn into_raw_parts(self) -> (usize, Opcode) {
         self.into()
@@ -378,6 +383,12 @@ impl Opcode {
     #[allow(unused)]
     pub fn is_explicit_consuming(&self) -> bool {
         matches!(self, Opcode::Consume(_) | Opcode::ConsumeSet(_))
+    }
+}
+
+impl From<Instruction> for Opcode {
+    fn from(inst: Instruction) -> Self {
+        inst.opcode
     }
 }
 

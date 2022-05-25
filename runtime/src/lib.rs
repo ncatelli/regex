@@ -138,9 +138,9 @@ impl Default for FastForward {
 
 #[derive(Default, Debug, PartialEq)]
 pub struct Instructions {
-    sets: Vec<CharacterSet>,
-    program: Vec<Instruction>,
-    fast_forward: FastForward,
+    pub sets: Vec<CharacterSet>,
+    pub program: Vec<Instruction>,
+    pub fast_forward: FastForward,
 }
 
 impl Instructions {
@@ -193,12 +193,32 @@ impl Instructions {
         }
     }
 
+    /// Returns the length of the associated program.
     pub fn len(&self) -> usize {
         self.program.len()
     }
 
+    /// Returns a boolean representing if the program contains 0 instructions.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// Returns a tuple representation of all composing parts of the program.
+    pub fn into_raw_parts(self) -> (FastForward, Vec<CharacterSet>, Vec<Instruction>) {
+        self.into()
+    }
+
+    /// Produces a program from its consituent parts.
+    pub fn from_raw_parts(
+        fast_forward: FastForward,
+        sets: Vec<CharacterSet>,
+        program: Vec<Instruction>,
+    ) -> Self {
+        Self {
+            sets,
+            program,
+            fast_forward,
+        }
     }
 }
 
@@ -231,6 +251,12 @@ impl std::ops::IndexMut<InstIndex> for Instructions {
 impl AsRef<[Instruction]> for Instructions {
     fn as_ref(&self) -> &[Instruction] {
         &self.program
+    }
+}
+
+impl From<Instructions> for (FastForward, Vec<CharacterSet>, Vec<Instruction>) {
+    fn from(insts: Instructions) -> Self {
+        (insts.fast_forward, insts.sets, insts.program)
     }
 }
 

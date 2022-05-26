@@ -361,7 +361,7 @@ pub enum Opcode {
     Any,
     Consume(InstConsume),
     ConsumeSet(InstConsumeSet),
-    Epsilon,
+    Epsilon(InstEpsilon),
     Split(InstSplit),
     Jmp(InstJmp),
     StartSave(InstStartSave),
@@ -399,7 +399,7 @@ impl Display for Opcode {
             Opcode::Any => Display::fmt(&InstAny::new(), f),
             Opcode::Consume(i) => Display::fmt(&i, f),
             Opcode::ConsumeSet(i) => Display::fmt(&i, f),
-            Opcode::Epsilon => todo!(),
+            Opcode::Epsilon(i) => Display::fmt(&i, f),
             Opcode::Split(i) => Display::fmt(&i, f),
             Opcode::Jmp(i) => Display::fmt(&i, f),
             Opcode::StartSave(i) => Display::fmt(&i, f),
@@ -598,6 +598,17 @@ impl Display for InstConsumeSet {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct InstEpsilon {}
+
+impl InstEpsilon {}
+
+impl Display for InstEpsilon {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Epsilon")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct InstSplit {
     x_branch: InstIndex,
     y_branch: InstIndex,
@@ -782,6 +793,90 @@ fn add_thread<const SG: usize>(
     }
 }
 
+struct Window<T: Copy> {
+    buffer: [Option<T>; 3],
+}
+
+impl<T: Copy> Window<T> {
+    fn new(buffer: [Option<T>; 3]) -> Self {
+        Self { buffer }
+    }
+
+    fn current(&self) -> Option<T> {
+        self.buffer[1]
+    }
+
+    fn push(&mut self, next: Option<T>) {
+        self.buffer.as_mut().rotate_left(1);
+        self.buffer.as_mut()[2] = next;
+    }
+}
+
+impl<T: Copy> AsRef<[Option<T>]> for Window<T> {
+    fn as_ref(&self) -> &[Option<T>] {
+        self.buffer.as_slice()
+    }
+}
+
+impl<T: Copy> AsMut<[Option<T>]> for Window<T> {
+    fn as_mut(&mut self) -> &mut [Option<T>] {
+        self.buffer.as_mut_slice()
+    }
+}
+
+impl<T: Copy> Default for Window<T> {
+    fn default() -> Self {
+        Self {
+            buffer: Default::default(),
+        }
+    }
+}
+
+#[derive(Default)]
+struct PositionalAttributes {}
+
+struct CharactersWithPositionalAttributes<I>
+where
+    I: Iterator<Item = (usize, char)>,
+{
+    buffer: Window<(usize, char)>,
+    iter: I,
+}
+
+impl<I> CharactersWithPositionalAttributes<I>
+where
+    I: Iterator<Item = (usize, char)>,
+{
+    fn new(mut iter: I) -> Self {
+        let lookahead = match iter.next() {
+            Some((idx, c)) => {
+                let first = Some((idx, c));
+                [None, None, first]
+            }
+            None => [None, None, None],
+        };
+
+        let buffer = Window::new(lookahead);
+
+        Self { buffer, iter }
+    }
+}
+
+impl<I> Iterator for CharactersWithPositionalAttributes<I>
+where
+    I: Iterator<Item = (usize, char)>,
+{
+    type Item = (usize, PositionalAttributes, char);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.buffer.push(self.iter.next());
+
+        self.buffer
+            .current()
+            .map(|(idx, c)| (idx, PositionalAttributes::default(), c))
+    }
+}
+
 /// Executes a given program against an input. If a match is found an
 /// `Optional` vector of savegroups is returned. A match occurs if all
 /// savegroup slots are marked complete and pattern match is found.
@@ -789,15 +884,12 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
     use core::mem::swap;
 
     let mut input_idx = 0;
-    let mut input_iter =
-        input
-            .chars()
-            .enumerate()
-            .skip_while(|(_, c)| match &program.fast_forward {
-                FastForward::None => false,
-                FastForward::Char(first_match) => *c != *first_match,
-                FastForward::Set(first_match) => first_match.not_in_set(*c),
-            });
+    let mut input_iter = CharactersWithPositionalAttributes::new(input.chars().enumerate())
+        .skip_while(|(_, _, c)| match &program.fast_forward {
+            FastForward::None => false,
+            FastForward::Char(first_match) => *c != *first_match,
+            FastForward::Set(first_match) => first_match.not_in_set(*c),
+        });
 
     let sets = &program.sets;
     let instructions = program.as_ref();
@@ -820,7 +912,7 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
 
     let mut done = false;
     'outer: while !done && !current_thread_list.threads.is_empty() {
-        let next_char = if let Some((idx, next)) = input_iter.next() {
+        let next_char = if let Some((idx, _attrs, next)) = input_iter.next() {
             input_idx = idx;
             Some(next)
         } else {

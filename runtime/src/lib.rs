@@ -361,6 +361,7 @@ pub enum Opcode {
     Any,
     Consume(InstConsume),
     ConsumeSet(InstConsumeSet),
+    Epsilon,
     Split(InstSplit),
     Jmp(InstJmp),
     StartSave(InstStartSave),
@@ -395,24 +396,16 @@ impl From<Instruction> for Opcode {
 impl Display for Opcode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Opcode::Match => Display::fmt(&InstMatch, f),
+            Opcode::Any => Display::fmt(&InstAny::new(), f),
             Opcode::Consume(i) => Display::fmt(&i, f),
             Opcode::ConsumeSet(i) => Display::fmt(&i, f),
+            Opcode::Epsilon => todo!(),
             Opcode::Split(i) => Display::fmt(&i, f),
-            Opcode::Any => Display::fmt(&InstAny::new(), f),
             Opcode::Jmp(i) => Display::fmt(&i, f),
             Opcode::StartSave(i) => Display::fmt(&i, f),
             Opcode::EndSave(i) => Display::fmt(&i, f),
+            Opcode::Match => Display::fmt(&InstMatch, f),
         }
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub struct InstMatch;
-
-impl Display for InstMatch {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Match",)
     }
 }
 
@@ -681,6 +674,15 @@ impl InstEndSave {
 impl Display for InstEndSave {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "EndSave[{:04}]", self.slot_id,)
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct InstMatch;
+
+impl Display for InstMatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Match",)
     }
 }
 

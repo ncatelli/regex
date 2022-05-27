@@ -18,6 +18,7 @@ enum RelativeOpcode {
     Any,
     Consume(char),
     ConsumeSet(CharacterSet),
+    Epsilon(EpsilonCond),
     Split(i32, i32),
     Jmp(i32),
     StartSave(usize),
@@ -30,6 +31,7 @@ impl RelativeOpcode {
         match self {
             RelativeOpcode::Any => Some(Opcode::Any),
             RelativeOpcode::Consume(c) => Some(Opcode::Consume(InstConsume::new(c))),
+            RelativeOpcode::Epsilon(ec) => Some(Opcode::Epsilon(InstEpsilon::new(ec))),
             RelativeOpcode::Split(rel_x, rel_y) => {
                 let signed_idx = idx as i32;
                 let x: u32 = (signed_idx + rel_x).try_into().ok()?;
@@ -154,7 +156,7 @@ fn subexpression(subexpr: ast::SubExpression) -> Result<RelativeOpcodes, String>
         .map(|subexpr_item| match subexpr_item {
             ast::SubExpressionItem::Match(m) => match_item(m),
             ast::SubExpressionItem::Group(g) => group(g),
-            ast::SubExpressionItem::Anchor(_) => todo!(),
+            ast::SubExpressionItem::Anchor(a) => anchor(a),
             ast::SubExpressionItem::Backreference(_) => unimplemented!(),
         })
         .collect::<Result<Vec<_>, _>>()
@@ -750,6 +752,22 @@ fn group(g: ast::Group) -> Result<RelativeOpcodes, String> {
             }
         }),
     }
+}
+
+// Anchors
+
+fn anchor(a: ast::Anchor) -> Result<RelativeOpcodes, String> {
+    let cond = match a {
+        ast::Anchor::WordBoundary => EpsilonCond::WordBoundary,
+        ast::Anchor::NonWordBoundary => EpsilonCond::NonWordBoundary,
+        ast::Anchor::StartOfStringOnly => EpsilonCond::StartOfStringOnly,
+        ast::Anchor::EndOfStringOnlyNonNewline => EpsilonCond::EndOfStringOnlyNonNewline,
+        ast::Anchor::EndOfStringOnly => EpsilonCond::EndOfStringOnly,
+        ast::Anchor::PreviousMatchEnd => EpsilonCond::PreviousMatchEnd,
+        ast::Anchor::EndOfString => EpsilonCond::EndOfString,
+    };
+
+    Ok(vec![RelativeOpcode::Epsilon(cond)])
 }
 
 #[cfg(test)]

@@ -597,14 +597,41 @@ impl Display for InstConsumeSet {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct InstEpsilon {}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EpsilonCond {
+    WordBoundary,
+    NonWordBoundary,
+    StartOfStringOnly,
+    EndOfStringOnlyNonNewline,
+    EndOfStringOnly,
+    PreviousMatchEnd,
+    EndOfString,
+}
 
-impl InstEpsilon {}
+#[derive(Debug, Clone, PartialEq)]
+pub struct InstEpsilon {
+    cond: EpsilonCond,
+}
+
+impl InstEpsilon {
+    pub fn new(kind: EpsilonCond) -> Self {
+        Self { cond: kind }
+    }
+}
 
 impl Display for InstEpsilon {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Epsilon")
+        let cond = match self.cond {
+            EpsilonCond::WordBoundary => "Word Boundary",
+            EpsilonCond::NonWordBoundary => "Non-Word Boundary",
+            EpsilonCond::StartOfStringOnly => "Start of String Only",
+            EpsilonCond::EndOfStringOnlyNonNewline => "End of String Only Non-Newline",
+            EpsilonCond::EndOfStringOnly => "End of String Only",
+            EpsilonCond::PreviousMatchEnd => "Previous Match End",
+            EpsilonCond::EndOfString => "End of String",
+        };
+
+        write!(f, "Epsilon: {{{}}}", cond)
     }
 }
 

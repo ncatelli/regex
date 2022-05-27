@@ -697,6 +697,111 @@ impl Display for InstMatch {
     }
 }
 
+/// A Window storing both the previous and next value of an input.
+#[derive(Debug, Clone, Copy)]
+struct Window<T: Copy> {
+    buffer: [Option<T>; 3],
+}
+
+impl<T: Copy> Window<T> {
+    fn new(buffer: [Option<T>; 3]) -> Self {
+        Self { buffer }
+    }
+
+    fn to_array(self) -> [Option<T>; 3] {
+        self.buffer
+    }
+
+    fn previous(&self) -> Option<T> {
+        self.buffer[0]
+    }
+
+    fn current(&self) -> Option<T> {
+        self.buffer[1]
+    }
+
+    fn next(&self) -> Option<T> {
+        self.buffer[2]
+    }
+
+    fn push(&mut self, next: Option<T>) {
+        // replace the item that will rotate around.
+        self.buffer.as_mut()[0] = next;
+        self.buffer.as_mut().rotate_left(1);
+    }
+}
+
+impl<T: Copy> AsRef<[Option<T>]> for Window<T> {
+    fn as_ref(&self) -> &[Option<T>] {
+        self.buffer.as_slice()
+    }
+}
+
+impl<T: Copy> AsMut<[Option<T>]> for Window<T> {
+    fn as_mut(&mut self) -> &mut [Option<T>] {
+        self.buffer.as_mut_slice()
+    }
+}
+
+impl<T: Copy> From<Window<T>> for [Option<T>; 3] {
+    fn from(window: Window<T>) -> Self {
+        window.to_array()
+    }
+}
+
+impl<T: Copy> Default for Window<T> {
+    fn default() -> Self {
+        Self {
+            buffer: Default::default(),
+        }
+    }
+}
+
+/// A buffered iterator that provides a lookahead and lookback for a given input.
+struct CharsWithLookAheadAndLookBack<I>
+where
+    I: Iterator<Item = (usize, char)>,
+{
+    buffer: Window<(usize, char)>,
+    iter: I,
+}
+
+impl<I> CharsWithLookAheadAndLookBack<I>
+where
+    I: Iterator<Item = (usize, char)>,
+{
+    fn new(mut iter: I) -> Self {
+        let lookahead = match iter.next() {
+            Some((idx, c)) => {
+                let first = Some((idx, c));
+                [None, None, first]
+            }
+            None => [None, None, None],
+        };
+
+        let buffer = Window::new(lookahead);
+
+        Self { buffer, iter }
+    }
+}
+
+impl<I> Iterator for CharsWithLookAheadAndLookBack<I>
+where
+    I: Iterator<Item = (usize, char)>,
+{
+    type Item = Window<(usize, char)>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.buffer.push(self.iter.next());
+
+        if self.buffer.current().is_some() {
+            Some(self.buffer)
+        } else {
+            None
+        }
+    }
+}
+
 fn add_thread<const SG: usize>(
     program: &[Instruction],
     save_groups: &mut [SaveGroupSlot; SG],
@@ -789,109 +894,6 @@ fn add_thread<const SG: usize>(
         _ => {
             thread_list.threads.push(t);
             thread_list
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct Window<T: Copy> {
-    buffer: [Option<T>; 3],
-}
-
-impl<T: Copy> Window<T> {
-    fn new(buffer: [Option<T>; 3]) -> Self {
-        Self { buffer }
-    }
-
-    fn to_array(self) -> [Option<T>; 3] {
-        self.buffer
-    }
-
-    fn previous(&self) -> Option<T> {
-        self.buffer[0]
-    }
-
-    fn current(&self) -> Option<T> {
-        self.buffer[1]
-    }
-
-    fn next(&self) -> Option<T> {
-        self.buffer[2]
-    }
-
-    fn push(&mut self, next: Option<T>) {
-        // replace the item that will rotate around.
-        self.buffer.as_mut()[0] = next;
-        self.buffer.as_mut().rotate_left(1);
-    }
-}
-
-impl<T: Copy> AsRef<[Option<T>]> for Window<T> {
-    fn as_ref(&self) -> &[Option<T>] {
-        self.buffer.as_slice()
-    }
-}
-
-impl<T: Copy> AsMut<[Option<T>]> for Window<T> {
-    fn as_mut(&mut self) -> &mut [Option<T>] {
-        self.buffer.as_mut_slice()
-    }
-}
-
-impl<T: Copy> From<Window<T>> for [Option<T>; 3] {
-    fn from(window: Window<T>) -> Self {
-        window.to_array()
-    }
-}
-
-impl<T: Copy> Default for Window<T> {
-    fn default() -> Self {
-        Self {
-            buffer: Default::default(),
-        }
-    }
-}
-
-struct CharsWithLookAheadAndLookBack<I>
-where
-    I: Iterator<Item = (usize, char)>,
-{
-    buffer: Window<(usize, char)>,
-    iter: I,
-}
-
-impl<I> CharsWithLookAheadAndLookBack<I>
-where
-    I: Iterator<Item = (usize, char)>,
-{
-    fn new(mut iter: I) -> Self {
-        let lookahead = match iter.next() {
-            Some((idx, c)) => {
-                let first = Some((idx, c));
-                [None, None, first]
-            }
-            None => [None, None, None],
-        };
-
-        let buffer = Window::new(lookahead);
-
-        Self { buffer, iter }
-    }
-}
-
-impl<I> Iterator for CharsWithLookAheadAndLookBack<I>
-where
-    I: Iterator<Item = (usize, char)>,
-{
-    type Item = Window<(usize, char)>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.buffer.push(self.iter.next());
-
-        if self.buffer.current().is_some() {
-            Some(self.buffer)
-        } else {
-            None
         }
     }
 }

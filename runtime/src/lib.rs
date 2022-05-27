@@ -793,6 +793,7 @@ fn add_thread<const SG: usize>(
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 struct Window<T: Copy> {
     buffer: [Option<T>; 3],
 }
@@ -802,13 +803,26 @@ impl<T: Copy> Window<T> {
         Self { buffer }
     }
 
+    fn to_array(self) -> [Option<T>; 3] {
+        self.buffer
+    }
+
+    fn previous(&self) -> Option<T> {
+        self.buffer[0]
+    }
+
     fn current(&self) -> Option<T> {
         self.buffer[1]
     }
 
+    fn next(&self) -> Option<T> {
+        self.buffer[2]
+    }
+
     fn push(&mut self, next: Option<T>) {
+        // replace the item that will rotate around.
+        self.buffer.as_mut()[0] = next;
         self.buffer.as_mut().rotate_left(1);
-        self.buffer.as_mut()[2] = next;
     }
 }
 
@@ -824,6 +838,12 @@ impl<T: Copy> AsMut<[Option<T>]> for Window<T> {
     }
 }
 
+impl<T: Copy> From<Window<T>> for [Option<T>; 3] {
+    fn from(window: Window<T>) -> Self {
+        window.to_array()
+    }
+}
+
 impl<T: Copy> Default for Window<T> {
     fn default() -> Self {
         Self {
@@ -832,10 +852,7 @@ impl<T: Copy> Default for Window<T> {
     }
 }
 
-#[derive(Default)]
-struct PositionalAttributes {}
-
-struct CharactersWithPositionalAttributes<I>
+struct CharsWithLookAheadAndLookBack<I>
 where
     I: Iterator<Item = (usize, char)>,
 {
@@ -843,7 +860,7 @@ where
     iter: I,
 }
 
-impl<I> CharactersWithPositionalAttributes<I>
+impl<I> CharsWithLookAheadAndLookBack<I>
 where
     I: Iterator<Item = (usize, char)>,
 {
@@ -862,18 +879,20 @@ where
     }
 }
 
-impl<I> Iterator for CharactersWithPositionalAttributes<I>
+impl<I> Iterator for CharsWithLookAheadAndLookBack<I>
 where
     I: Iterator<Item = (usize, char)>,
 {
-    type Item = (usize, PositionalAttributes, char);
+    type Item = Window<(usize, char)>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.buffer.push(self.iter.next());
 
-        self.buffer
-            .current()
-            .map(|(idx, c)| (idx, PositionalAttributes::default(), c))
+        if self.buffer.current().is_some() {
+            Some(self.buffer)
+        } else {
+            None
+        }
     }
 }
 
@@ -884,11 +903,13 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
     use core::mem::swap;
 
     let mut input_idx = 0;
-    let mut input_iter = CharactersWithPositionalAttributes::new(input.chars().enumerate())
-        .skip_while(|(_, _, c)| match &program.fast_forward {
-            FastForward::None => false,
-            FastForward::Char(first_match) => *c != *first_match,
-            FastForward::Set(first_match) => first_match.not_in_set(*c),
+    let mut input_iter =
+        CharsWithLookAheadAndLookBack::new(input.chars().enumerate()).skip_while(|window| {
+            match (window.current(), &program.fast_forward) {
+                (None, _) | (_, FastForward::None) => false,
+                (Some((_, c)), FastForward::Char(first_match)) => c != *first_match,
+                (Some((_, c)), FastForward::Set(first_match)) => first_match.not_in_set(c),
+            }
         });
 
     let sets = &program.sets;
@@ -912,12 +933,20 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
 
     let mut done = false;
     'outer: while !done && !current_thread_list.threads.is_empty() {
-        let next_char = if let Some((idx, _attrs, next)) = input_iter.next() {
-            input_idx = idx;
-            Some(next)
-        } else {
-            done = true;
-            None
+        let [_lookback, next_char, _lookahead] = match input_iter.next() {
+            Some(window) => {
+                let lookback = window.previous().map(|(_, c)| c);
+                // safe to assume we can unwrap this given Some is returned if next is some.
+                let (idx, next) = window.current().unwrap();
+                let lookahead = window.next().map(|(_, c)| c);
+
+                input_idx = idx;
+                [lookback, Some(next), lookahead]
+            }
+            None => {
+                done = true;
+                [None, None, None]
+            }
         };
 
         for thread in current_thread_list.threads.iter() {

@@ -614,8 +614,8 @@ pub struct InstEpsilon {
 }
 
 impl InstEpsilon {
-    pub fn new(kind: EpsilonCond) -> Self {
-        Self { cond: kind }
+    pub fn new(cond: EpsilonCond) -> Self {
+        Self { cond }
     }
 }
 

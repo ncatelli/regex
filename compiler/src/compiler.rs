@@ -1876,4 +1876,20 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn should_compile_anchor_or_boundary() {
+        // approximate to `^(\b)`
+        let regex_ast = Regex::StartOfStringAnchored(Expression(vec![SubExpression(vec![
+            SubExpressionItem::Anchor(Anchor::WordBoundary),
+        ])]));
+
+        assert_eq!(
+            Ok(Instructions::default().with_opcodes(vec![
+                Opcode::Epsilon(InstEpsilon::new(EpsilonCond::WordBoundary)),
+                Opcode::Match
+            ])),
+            compile(regex_ast)
+        );
+    }
 }

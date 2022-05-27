@@ -1879,14 +1879,18 @@ mod tests {
 
     #[test]
     fn should_compile_anchor_or_boundary() {
-        // approximate to `^(\b)`
+        // approximate to `^(\ba)`
         let regex_ast = Regex::StartOfStringAnchored(Expression(vec![SubExpression(vec![
             SubExpressionItem::Anchor(Anchor::WordBoundary),
+            SubExpressionItem::Match(Match::WithoutQuantifier {
+                item: MatchItem::MatchCharacter(MatchCharacter(Char('a'))),
+            }),
         ])]));
 
         assert_eq!(
             Ok(Instructions::default().with_opcodes(vec![
                 Opcode::Epsilon(InstEpsilon::new(EpsilonCond::WordBoundary)),
+                Opcode::Consume(InstConsume::new('a')),
                 Opcode::Match
             ])),
             compile(regex_ast)

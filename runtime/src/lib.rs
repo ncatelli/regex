@@ -760,20 +760,20 @@ impl<T: Copy> Default for Window<T> {
 /// A buffered iterator that provides a lookahead and lookback for a given input.
 struct CharsWithLookAheadAndLookBack<I>
 where
-    I: Iterator<Item = (usize, char)>,
+    I: Iterator<Item = char>,
 {
-    buffer: Window<(usize, char)>,
+    buffer: Window<char>,
     iter: I,
 }
 
 impl<I> CharsWithLookAheadAndLookBack<I>
 where
-    I: Iterator<Item = (usize, char)>,
+    I: Iterator<Item = char>,
 {
     fn new(mut iter: I) -> Self {
         let lookahead = match iter.next() {
-            Some((idx, c)) => {
-                let first = Some((idx, c));
+            Some(c) => {
+                let first = Some(c);
                 [None, None, first]
             }
             None => [None, None, None],
@@ -787,9 +787,9 @@ where
 
 impl<I> Iterator for CharsWithLookAheadAndLookBack<I>
 where
-    I: Iterator<Item = (usize, char)>,
+    I: Iterator<Item = char>,
 {
-    type Item = Window<(usize, char)>;
+    type Item = Window<char>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.buffer.push(self.iter.next());
@@ -905,14 +905,15 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
     use core::mem::swap;
 
     let mut input_idx = 0;
-    let mut input_iter =
-        CharsWithLookAheadAndLookBack::new(input.chars().enumerate()).skip_while(|window| {
-            match (window.current(), &program.fast_forward) {
+    let mut input_iter = CharsWithLookAheadAndLookBack::new(input.chars())
+        .enumerate()
+        .skip_while(
+            |(_, window)| match (window.current(), &program.fast_forward) {
                 (None, _) | (_, FastForward::None) => false,
-                (Some((_, c)), FastForward::Char(first_match)) => c != *first_match,
-                (Some((_, c)), FastForward::Set(first_match)) => first_match.not_in_set(c),
-            }
-        });
+                (Some(c), FastForward::Char(first_match)) => c != *first_match,
+                (Some(c), FastForward::Set(first_match)) => first_match.not_in_set(c),
+            },
+        );
 
     let sets = &program.sets;
     let instructions = program.as_ref();
@@ -936,11 +937,11 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
     let mut done = false;
     'outer: while !done && !current_thread_list.threads.is_empty() {
         let [_lookback, next_char, _lookahead] = match input_iter.next() {
-            Some(window) => {
-                let lookback = window.previous().map(|(_, c)| c);
+            Some((idx, window)) => {
+                let lookback = window.previous();
                 // safe to assume we can unwrap this given Some is returned if next is some.
-                let (idx, next) = window.current().unwrap();
-                let lookahead = window.next().map(|(_, c)| c);
+                let next = window.current().unwrap();
+                let lookahead = window.next();
 
                 input_idx = idx;
                 [lookback, Some(next), lookahead]

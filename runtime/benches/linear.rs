@@ -99,11 +99,15 @@ pub fn linear_input_size_comparison_against_set_match(c: &mut Criterion) {
     let mut group = c.benchmark_group("input length comparison for set matching");
     let input = "ab";
     let pad = "xy";
+    let inclusive_set = CharacterSet::inclusive(CharacterAlphabet::Ranges(vec![
+        'a'..='w',
+        'A'..='W',
+        '0'..='9',
+        '_'..='_',
+    ]));
 
     let prog = Instructions::default()
-        .with_sets(vec![CharacterSet::inclusive(CharacterAlphabet::Ranges(
-            vec!['a'..='z', 'A'..='Z', '0'..='9', '_'..='_'],
-        ))])
+        .with_sets(vec![inclusive_set])
         .with_opcodes(vec![
             Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
             Opcode::Any,
@@ -139,11 +143,15 @@ pub fn linear_input_size_comparison_against_set_match_with_fast_forward(c: &mut 
     let mut group = c.benchmark_group("input length comparison for set matching with fast-forward");
     let input = "ab";
     let pad = "xy";
+    let inclusive_set = CharacterSet::inclusive(CharacterAlphabet::Ranges(vec![
+        'a'..='w',
+        'A'..='W',
+        '0'..='9',
+        '_'..='_',
+    ]));
 
     let prog = Instructions::default()
-        .with_sets(vec![CharacterSet::inclusive(CharacterAlphabet::Ranges(
-            vec!['a'..='z', 'A'..='Z', '0'..='9', '_'..='_'],
-        ))])
+        .with_sets(vec![inclusive_set.clone()])
         .with_opcodes(vec![
             Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
             Opcode::Any,
@@ -154,9 +162,7 @@ pub fn linear_input_size_comparison_against_set_match_with_fast_forward(c: &mut 
             Opcode::EndSave(InstEndSave::new(0)),
             Opcode::Match,
         ])
-        .with_fast_forward(FastForward::Set(CharacterSet::inclusive(
-            CharacterAlphabet::Ranges(vec!['a'..='z', 'A'..='Z', '0'..='9', '_'..='_']),
-        )));
+        .with_fast_forward(FastForward::Set(inclusive_set));
 
     (1..10)
         .map(|exponent| 2usize.pow(exponent))

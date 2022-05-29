@@ -759,9 +759,35 @@ fn add_thread<const SG: usize>(
                 Some(sg) => *sg,
                 None => panic!("index out of range"),
             };
-            let next = inst_idx + 1;
 
-            save_groups[*slot_id] = SaveGroupSlot::from(closed_save);
+            let thread_save_group_slot = SaveGroupSlot::from(closed_save);
+
+            match (save_groups.get(*slot_id), thread_save_group_slot) {
+                // Save a valid match.
+                (Some(SaveGroupSlot::None), thread_save_group_slot) => {
+                    save_groups[*slot_id] = thread_save_group_slot;
+                }
+
+                // if the match is a better match from the same root, choose it.
+                (
+                    Some(SaveGroupSlot::Complete {
+                        start: global_start,
+                        ..
+                    }),
+                    SaveGroupSlot::Complete { start: t_start, .. },
+                ) if t_start == *global_start => {
+                    save_groups[*slot_id] = thread_save_group_slot;
+                }
+
+                // already matched, do nothing.
+                (Some(SaveGroupSlot::Complete { .. }), SaveGroupSlot::Complete { .. }) => (),
+
+                // save group slot will guaranteed to be `Complete` from the
+                // above check.
+                (Some(_), SaveGroupSlot::None) => unreachable!(),
+                (None, _) => panic!("save group slot out of range."),
+            };
+
             let mut thread_save_group = t.save_groups;
             thread_save_group[*slot_id] = closed_save;
 
@@ -769,7 +795,7 @@ fn add_thread<const SG: usize>(
                 program,
                 save_groups,
                 thread_list,
-                Thread::new(thread_save_group, next),
+                Thread::new(thread_save_group, default_next_inst_idx),
                 sp,
             )
         }
@@ -1150,6 +1176,28 @@ mod tests {
             let res = run::<1>(&prog, input);
             assert_eq!((test_num, Some(expected_res)), (test_num, res))
         }
+    }
+
+    #[test]
+    fn should_match_first_match() {
+        let (save_group, prog) = (
+            [SaveGroupSlot::complete(0, 2)],
+            Instructions::default().with_opcodes(vec![
+                Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
+                Opcode::Any,
+                Opcode::Jmp(InstJmp::new(InstIndex::from(0))),
+                Opcode::StartSave(InstStartSave::new(0)),
+                Opcode::Consume(InstConsume::new('a')),
+                Opcode::Consume(InstConsume::new('a')),
+                Opcode::EndSave(InstEndSave::new(0)),
+                Opcode::Match,
+            ]),
+        );
+
+        let input = "aaaab";
+
+        let res = run::<1>(&prog, input);
+        assert_eq!(Some(save_group), res)
     }
 
     #[test]

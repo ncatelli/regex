@@ -900,7 +900,7 @@ fn add_thread<const SG: usize>(
                     end: sp,
                 },
 
-                // if the save group is not open, return none.
+                // if the save group is not open return it.
                 Some(sg) => *sg,
                 None => panic!("index out of range"),
             };

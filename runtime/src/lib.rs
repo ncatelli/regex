@@ -1342,7 +1342,7 @@ mod tests {
     }
 
     #[test]
-    fn should_match_first_match() {
+    fn should_match_first_match_in_unanchored_expression() {
         let (save_group, prog) = (
             [SaveGroupSlot::complete(0, 2)],
             Instructions::default().with_opcodes(vec![

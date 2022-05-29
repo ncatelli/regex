@@ -49,13 +49,17 @@ impl Default for SaveGroupSlot {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SaveGroup {
     None,
+    /// Represents a lot that has been allocated but with no valid match.
     Allocated {
         slot_id: usize,
     },
+    /// Represents an open pattern that a regex is actively attempting to
+    /// match.
     Open {
         slot_id: usize,
         start: usize,
     },
+    // Represents a completed match.
     Complete {
         slot_id: usize,
         start: usize,
@@ -1302,6 +1306,29 @@ mod tests {
             let res = run::<1>(&prog, input);
             assert_eq!((test_num, Some(expected_res)), (test_num, res))
         }
+    }
+
+    #[test]
+    #[ignore = "known to fail"]
+    fn should_evaluate_first_match() {
+        let (save_group, prog) = (
+            [SaveGroupSlot::complete(0, 2)],
+            Instructions::default().with_opcodes(vec![
+                Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
+                Opcode::Any,
+                Opcode::Jmp(InstJmp::new(InstIndex::from(0))),
+                Opcode::StartSave(InstStartSave::new(0)),
+                Opcode::Consume(InstConsume::new('a')),
+                Opcode::Consume(InstConsume::new('a')),
+                Opcode::EndSave(InstEndSave::new(0)),
+                Opcode::Match,
+            ]),
+        );
+
+        let input = "aaaaab";
+
+        let res = run::<1>(&prog, input);
+        assert_eq!(Some(save_group), res)
     }
 
     #[test]

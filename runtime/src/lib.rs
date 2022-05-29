@@ -1153,6 +1153,28 @@ mod tests {
     }
 
     #[test]
+    fn should_match_first_match() {
+        let (save_group, prog) = (
+            [SaveGroupSlot::complete(0, 2)],
+            Instructions::default().with_opcodes(vec![
+                Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
+                Opcode::Any,
+                Opcode::Jmp(InstJmp::new(InstIndex::from(0))),
+                Opcode::StartSave(InstStartSave::new(0)),
+                Opcode::Consume(InstConsume::new('a')),
+                Opcode::Consume(InstConsume::new('a')),
+                Opcode::EndSave(InstEndSave::new(0)),
+                Opcode::Match,
+            ]),
+        );
+
+        let input = "aaaab";
+
+        let res = run::<1>(&prog, input);
+        assert_eq!(Some(save_group), res)
+    }
+
+    #[test]
     fn should_evaluate_multiple_save_groups_expression() {
         // (aa)(b)
         let (expected_res, prog) = (

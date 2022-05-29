@@ -1562,6 +1562,34 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "unimplemented"]
+    fn should_follow_epsilon_transition() {
+        let tests = vec![
+            (None, "baab"),
+            (Some([SaveGroupSlot::complete(0, 2)]), "aab"),
+            (Some([SaveGroupSlot::complete(0, 2)]), "aaab"),
+            (Some([SaveGroupSlot::complete(1, 3)]), " aab"),
+            (Some([SaveGroupSlot::complete(1, 3)]), " aaaab"),
+        ];
+        let prog = Instructions::default().with_opcodes(vec![
+            Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
+            Opcode::Any,
+            Opcode::Jmp(InstJmp::new(InstIndex::from(0))),
+            Opcode::StartSave(InstStartSave::new(0)),
+            Opcode::Epsilon(InstEpsilon::new(EpsilonCond::WordBoundary)),
+            Opcode::Consume(InstConsume::new('a')),
+            Opcode::Consume(InstConsume::new('a')),
+            Opcode::EndSave(InstEndSave::new(0)),
+            Opcode::Match,
+        ]);
+
+        for (test_id, (expected_res, input)) in tests.into_iter().enumerate() {
+            let res = run::<1>(&prog, input);
+            assert_eq!((test_id, expected_res), (test_id, res))
+        }
+    }
+
+    #[test]
     fn should_retain_a_fixed_opcode_size() {
         use core::mem::size_of;
 

@@ -835,6 +835,7 @@ fn add_thread<const SG: usize>(
     mut thread_list: Threads<SG>,
     t: Thread<SG>,
     sp: usize,
+    window: [Option<char>; 3],
 ) -> Threads<SG> {
     let inst_idx = t.inst;
     let default_next_inst_idx = inst_idx + 1;
@@ -863,6 +864,7 @@ fn add_thread<const SG: usize>(
                 thread_list,
                 Thread::new(t.save_groups, x),
                 sp,
+                window,
             );
 
             add_thread(
@@ -871,6 +873,7 @@ fn add_thread<const SG: usize>(
                 thread_list,
                 Thread::new(t.save_groups, y),
                 sp,
+                window,
             )
         }
         Opcode::Jmp(InstJmp { next }) => add_thread(
@@ -879,6 +882,7 @@ fn add_thread<const SG: usize>(
             thread_list,
             Thread::new(t.save_groups, *next),
             sp,
+            window,
         ),
         Opcode::StartSave(InstStartSave { slot_id }) => {
             let mut groups = t.save_groups;
@@ -890,6 +894,7 @@ fn add_thread<const SG: usize>(
                 thread_list,
                 Thread::new(groups, default_next_inst_idx),
                 sp,
+                window,
             )
         }
         Opcode::EndSave(InstEndSave { slot_id }) => {
@@ -942,6 +947,7 @@ fn add_thread<const SG: usize>(
                 thread_list,
                 Thread::new(thread_save_group, default_next_inst_idx),
                 sp,
+                window,
             )
         }
         _ => {
@@ -985,11 +991,12 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
         current_thread_list,
         Thread::new([SaveGroup::None; SG], InstIndex::from(0)),
         0,
+        [None, None, None],
     );
 
     let mut done = false;
     'outer: while !done && !current_thread_list.threads.is_empty() {
-        let [_lookback, next_char, _lookahead] = match input_iter.next() {
+        let [lookback, next_char, lookahead] = match input_iter.next() {
             Some((idx, window)) => {
                 let lookback = window.previous();
                 // safe to assume we can unwrap this given Some is returned if next is some.
@@ -1024,6 +1031,7 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
                         next_thread_list,
                         Thread::new(thread_local_save_group, default_next_inst_idx),
                         input_idx + 1,
+                        [lookback, next_char, lookahead],
                     );
                 }
 
@@ -1044,6 +1052,7 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
                         next_thread_list,
                         Thread::new(thread_local_save_group, default_next_inst_idx),
                         input_idx + 1,
+                        [lookback, next_char, lookahead],
                     );
                 }
 
@@ -1068,6 +1077,7 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
                         next_thread_list,
                         Thread::<SG>::new(thread_local_save_group, default_next_inst_idx),
                         input_idx + 1,
+                        [lookback, next_char, lookahead],
                     );
                 }
 

@@ -361,6 +361,7 @@ pub enum Opcode {
     Any,
     Consume(InstConsume),
     ConsumeSet(InstConsumeSet),
+    Epsilon(InstEpsilon),
     Split(InstSplit),
     Jmp(InstJmp),
     StartSave(InstStartSave),
@@ -395,24 +396,16 @@ impl From<Instruction> for Opcode {
 impl Display for Opcode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Opcode::Match => Display::fmt(&InstMatch, f),
+            Opcode::Any => Display::fmt(&InstAny::new(), f),
             Opcode::Consume(i) => Display::fmt(&i, f),
             Opcode::ConsumeSet(i) => Display::fmt(&i, f),
+            Opcode::Epsilon(i) => Display::fmt(&i, f),
             Opcode::Split(i) => Display::fmt(&i, f),
-            Opcode::Any => Display::fmt(&InstAny::new(), f),
             Opcode::Jmp(i) => Display::fmt(&i, f),
             Opcode::StartSave(i) => Display::fmt(&i, f),
             Opcode::EndSave(i) => Display::fmt(&i, f),
+            Opcode::Match => Display::fmt(&InstMatch, f),
         }
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub struct InstMatch;
-
-impl Display for InstMatch {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Match",)
     }
 }
 
@@ -610,6 +603,44 @@ pub struct InstSplit {
     y_branch: InstIndex,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EpsilonCond {
+    WordBoundary,
+    NonWordBoundary,
+    StartOfStringOnly,
+    EndOfStringOnlyNonNewline,
+    EndOfStringOnly,
+    PreviousMatchEnd,
+    EndOfString,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct InstEpsilon {
+    cond: EpsilonCond,
+}
+
+impl InstEpsilon {
+    pub fn new(cond: EpsilonCond) -> Self {
+        Self { cond }
+    }
+}
+
+impl Display for InstEpsilon {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let cond = match self.cond {
+            EpsilonCond::WordBoundary => "Word Boundary",
+            EpsilonCond::NonWordBoundary => "Non-Word Boundary",
+            EpsilonCond::StartOfStringOnly => "Start of String Only",
+            EpsilonCond::EndOfStringOnlyNonNewline => "End of String Only Non-Newline",
+            EpsilonCond::EndOfStringOnly => "End of String Only",
+            EpsilonCond::PreviousMatchEnd => "Previous Match End",
+            EpsilonCond::EndOfString => "End of String",
+        };
+
+        write!(f, "Epsilon: {{{}}}", cond)
+    }
+}
+
 impl InstSplit {
     #[must_use]
     pub fn new(x: InstIndex, y: InstIndex) -> Self {
@@ -681,6 +712,120 @@ impl InstEndSave {
 impl Display for InstEndSave {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "EndSave[{:04}]", self.slot_id,)
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct InstMatch;
+
+impl Display for InstMatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Match",)
+    }
+}
+
+/// A Window storing both the previous and next value of an input.
+#[derive(Debug, Clone, Copy)]
+struct Window<T: Copy> {
+    buffer: [Option<T>; 3],
+}
+
+impl<T: Copy> Window<T> {
+    fn new(buffer: [Option<T>; 3]) -> Self {
+        Self { buffer }
+    }
+
+    fn to_array(self) -> [Option<T>; 3] {
+        self.buffer
+    }
+
+    fn previous(&self) -> Option<T> {
+        self.buffer[0]
+    }
+
+    fn current(&self) -> Option<T> {
+        self.buffer[1]
+    }
+
+    fn next(&self) -> Option<T> {
+        self.buffer[2]
+    }
+
+    fn push(&mut self, next: Option<T>) {
+        // replace the item that will rotate around.
+        self.buffer.as_mut()[0] = next;
+        self.buffer.as_mut().rotate_left(1);
+    }
+}
+
+impl<T: Copy> AsRef<[Option<T>]> for Window<T> {
+    fn as_ref(&self) -> &[Option<T>] {
+        self.buffer.as_slice()
+    }
+}
+
+impl<T: Copy> AsMut<[Option<T>]> for Window<T> {
+    fn as_mut(&mut self) -> &mut [Option<T>] {
+        self.buffer.as_mut_slice()
+    }
+}
+
+impl<T: Copy> From<Window<T>> for [Option<T>; 3] {
+    fn from(window: Window<T>) -> Self {
+        window.to_array()
+    }
+}
+
+impl<T: Copy> Default for Window<T> {
+    fn default() -> Self {
+        Self {
+            buffer: Default::default(),
+        }
+    }
+}
+
+/// A buffered iterator that provides a lookahead and lookback for a given input.
+struct CharsWithLookAheadAndLookBack<I>
+where
+    I: Iterator<Item = char>,
+{
+    buffer: Window<char>,
+    iter: I,
+}
+
+impl<I> CharsWithLookAheadAndLookBack<I>
+where
+    I: Iterator<Item = char>,
+{
+    fn new(mut iter: I) -> Self {
+        let lookahead = match iter.next() {
+            Some(c) => {
+                let first = Some(c);
+                [None, None, first]
+            }
+            None => [None, None, None],
+        };
+
+        let buffer = Window::new(lookahead);
+
+        Self { buffer, iter }
+    }
+}
+
+impl<I> Iterator for CharsWithLookAheadAndLookBack<I>
+where
+    I: Iterator<Item = char>,
+{
+    type Item = Window<char>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.buffer.push(self.iter.next());
+
+        if self.buffer.current().is_some() {
+            Some(self.buffer)
+        } else {
+            None
+        }
     }
 }
 
@@ -813,15 +958,15 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
     use core::mem::swap;
 
     let mut input_idx = 0;
-    let mut input_iter =
-        input
-            .chars()
-            .enumerate()
-            .skip_while(|(_, c)| match &program.fast_forward {
-                FastForward::None => false,
-                FastForward::Char(first_match) => *c != *first_match,
-                FastForward::Set(first_match) => first_match.not_in_set(*c),
-            });
+    let mut input_iter = CharsWithLookAheadAndLookBack::new(input.chars())
+        .enumerate()
+        .skip_while(
+            |(_, window)| match (window.current(), &program.fast_forward) {
+                (None, _) | (_, FastForward::None) => false,
+                (Some(c), FastForward::Char(first_match)) => c != *first_match,
+                (Some(c), FastForward::Set(first_match)) => first_match.not_in_set(c),
+            },
+        );
 
     let sets = &program.sets;
     let instructions = program.as_ref();
@@ -844,12 +989,20 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
 
     let mut done = false;
     'outer: while !done && !current_thread_list.threads.is_empty() {
-        let next_char = if let Some((idx, next)) = input_iter.next() {
-            input_idx = idx;
-            Some(next)
-        } else {
-            done = true;
-            None
+        let [_lookback, next_char, _lookahead] = match input_iter.next() {
+            Some((idx, window)) => {
+                let lookback = window.previous();
+                // safe to assume we can unwrap this given Some is returned if next is some.
+                let next = window.current().unwrap();
+                let lookahead = window.next();
+
+                input_idx = idx;
+                [lookback, Some(next), lookahead]
+            }
+            None => {
+                done = true;
+                [None, None, None]
+            }
         };
 
         for thread in current_thread_list.threads.iter() {

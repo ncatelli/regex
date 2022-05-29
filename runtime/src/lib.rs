@@ -760,7 +760,34 @@ fn add_thread<const SG: usize>(
                 None => panic!("index out of range"),
             };
 
-            save_groups[*slot_id] = SaveGroupSlot::from(closed_save);
+            let thread_save_group_slot = SaveGroupSlot::from(closed_save);
+
+            match (save_groups.get(*slot_id), thread_save_group_slot) {
+                // Save a valid match.
+                (Some(SaveGroupSlot::None), thread_save_group_slot) => {
+                    save_groups[*slot_id] = thread_save_group_slot;
+                }
+
+                // if the match is a better match from the same root, choose it.
+                (
+                    Some(SaveGroupSlot::Complete {
+                        start: global_start,
+                        ..
+                    }),
+                    SaveGroupSlot::Complete { start: t_start, .. },
+                ) if t_start == *global_start => {
+                    save_groups[*slot_id] = thread_save_group_slot;
+                }
+
+                // already matched, do nothing.
+                (Some(SaveGroupSlot::Complete { .. }), SaveGroupSlot::Complete { .. }) => (),
+
+                // save group slot will guaranteed to be `Complete` from the
+                // above check.
+                (Some(_), SaveGroupSlot::None) => unreachable!(),
+                (None, _) => panic!("save group slot out of range."),
+            };
+
             let mut thread_save_group = t.save_groups;
             thread_save_group[*slot_id] = closed_save;
 

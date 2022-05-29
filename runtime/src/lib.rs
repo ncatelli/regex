@@ -904,7 +904,6 @@ fn add_thread<const SG: usize>(
                 Some(sg) => *sg,
                 None => panic!("index out of range"),
             };
-            let next = inst_idx + 1;
 
             save_groups[*slot_id] = SaveGroupSlot::from(closed_save);
             let mut thread_save_group = t.save_groups;
@@ -914,7 +913,7 @@ fn add_thread<const SG: usize>(
                 program,
                 save_groups,
                 thread_list,
-                Thread::new(thread_save_group, next),
+                Thread::new(thread_save_group, default_next_inst_idx),
                 sp,
             )
         }

@@ -18,6 +18,7 @@ enum RelativeOpcode {
     Any,
     Consume(char),
     ConsumeSet(CharacterSet),
+    Epsilon(EpsilonCond),
     Split(i32, i32),
     Jmp(i32),
     StartSave(usize),
@@ -30,6 +31,7 @@ impl RelativeOpcode {
         match self {
             RelativeOpcode::Any => Some(Opcode::Any),
             RelativeOpcode::Consume(c) => Some(Opcode::Consume(InstConsume::new(c))),
+            RelativeOpcode::Epsilon(ec) => Some(Opcode::Epsilon(InstEpsilon::new(ec))),
             RelativeOpcode::Split(rel_x, rel_y) => {
                 let signed_idx = idx as i32;
                 let x: u32 = (signed_idx + rel_x).try_into().ok()?;
@@ -116,12 +118,12 @@ pub fn compile(regex_ast: ast::Regex) -> Result<Instructions, String> {
             (sets, absolute_insts)
         })
         .map(|(sets, insts)| {
-            let first_consuming = (insts)
+            let first_available_stop = (insts)
                 .iter()
-                .find(|opcode| opcode.is_explicit_consuming())
+                .find(|opcode| opcode.requires_lookahead() || opcode.is_explicit_consuming())
                 .cloned();
 
-            match (anchored, first_consuming) {
+            match (anchored, first_available_stop) {
                 (false, Some(Opcode::Consume(InstConsume { value }))) => {
                     Instructions::new(sets, insts).with_fast_forward(FastForward::Char(value))
                 }
@@ -129,6 +131,12 @@ pub fn compile(regex_ast: ast::Regex) -> Result<Instructions, String> {
                     let ff_set = sets[idx].clone();
                     Instructions::new(sets, insts).with_fast_forward(FastForward::Set(ff_set))
                 }
+                (
+                    false,
+                    Some(Opcode::Epsilon(InstEpsilon {
+                        cond: EpsilonCond::WordBoundary,
+                    })),
+                ) => Instructions::new(sets, insts),
                 // catch-all
                 (false, None) | (false, Some(_)) | (true, _) => Instructions::new(sets, insts),
             }
@@ -154,7 +162,7 @@ fn subexpression(subexpr: ast::SubExpression) -> Result<RelativeOpcodes, String>
         .map(|subexpr_item| match subexpr_item {
             ast::SubExpressionItem::Match(m) => match_item(m),
             ast::SubExpressionItem::Group(g) => group(g),
-            ast::SubExpressionItem::Anchor(_) => todo!(),
+            ast::SubExpressionItem::Anchor(a) => anchor(a),
             ast::SubExpressionItem::Backreference(_) => unimplemented!(),
         })
         .collect::<Result<Vec<_>, _>>()
@@ -750,6 +758,22 @@ fn group(g: ast::Group) -> Result<RelativeOpcodes, String> {
             }
         }),
     }
+}
+
+// Anchors
+
+fn anchor(a: ast::Anchor) -> Result<RelativeOpcodes, String> {
+    let cond = match a {
+        ast::Anchor::WordBoundary => EpsilonCond::WordBoundary,
+        ast::Anchor::NonWordBoundary => EpsilonCond::NonWordBoundary,
+        ast::Anchor::StartOfStringOnly => EpsilonCond::StartOfStringOnly,
+        ast::Anchor::EndOfStringOnlyNonNewline => EpsilonCond::EndOfStringOnlyNonNewline,
+        ast::Anchor::EndOfStringOnly => EpsilonCond::EndOfStringOnly,
+        ast::Anchor::PreviousMatchEnd => EpsilonCond::PreviousMatchEnd,
+        ast::Anchor::EndOfString => EpsilonCond::EndOfString,
+    };
+
+    Ok(vec![RelativeOpcode::Epsilon(cond)])
 }
 
 #[cfg(test)]
@@ -1857,5 +1881,25 @@ mod tests {
                 (id, res)
             );
         }
+    }
+
+    #[test]
+    fn should_compile_anchor_or_boundary() {
+        // approximate to `^(\ba)`
+        let regex_ast = Regex::StartOfStringAnchored(Expression(vec![SubExpression(vec![
+            SubExpressionItem::Anchor(Anchor::WordBoundary),
+            SubExpressionItem::Match(Match::WithoutQuantifier {
+                item: MatchItem::MatchCharacter(MatchCharacter(Char('a'))),
+            }),
+        ])]));
+
+        assert_eq!(
+            Ok(Instructions::default().with_opcodes(vec![
+                Opcode::Epsilon(InstEpsilon::new(EpsilonCond::WordBoundary)),
+                Opcode::Consume(InstConsume::new('a')),
+                Opcode::Match
+            ])),
+            compile(regex_ast)
+        );
     }
 }

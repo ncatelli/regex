@@ -43,7 +43,7 @@ fn main() -> Result<(), String> {
     for line in input.lock().lines() {
         match line {
             Ok(line) => match regex_runtime::run::<0>(&program, &line) {
-                Some(_) => println!("{}", line),
+                Some([]) => println!("{}", line),
                 None => continue,
             },
             Err(e) => return Err(format!("{}", e)),

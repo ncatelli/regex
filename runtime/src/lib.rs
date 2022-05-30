@@ -952,6 +952,7 @@ fn add_thread<const SG: usize>(
             )
         }
 
+        // cover empty initial-state
         Opcode::Epsilon(InstEpsilon { .. }) if window == [None, None] => add_thread(
             program,
             save_groups,
@@ -965,10 +966,13 @@ fn add_thread<const SG: usize>(
             cond: EpsilonCond::WordBoundary,
         }) => {
             let lookback_is_whitespace = lookback.map(|c| c.is_whitespace()).unwrap_or(false);
-            let current_is_not_whitespace =
-                current_char.map(|c| !c.is_whitespace()).unwrap_or(false);
+            let current_is_not_whitespace = current_char.map(|c| c.is_whitespace()).unwrap_or(true);
 
-            if current_is_not_whitespace && lookback_is_whitespace {
+            // Place is a boundary if both lookback and current are either
+            // both not whitespace or both not chars.
+            let is_boundary = current_is_not_whitespace ^ lookback_is_whitespace;
+
+            if is_boundary {
                 add_thread(
                     program,
                     save_groups,
@@ -1595,7 +1599,7 @@ mod tests {
     }
 
     #[test]
-    fn should_follow_epsilon_transition() {
+    fn should_follow_word_boundary_epsilon_transition_on_start_of_input_or_whitespace() {
         let tests = vec![
             (None, "baab"),
             (Some([SaveGroupSlot::complete(0, 2)]), "aab"),
@@ -1613,6 +1617,35 @@ mod tests {
             Opcode::Epsilon(InstEpsilon::new(EpsilonCond::WordBoundary)),
             Opcode::Consume(InstConsume::new('a')),
             Opcode::Consume(InstConsume::new('a')),
+            Opcode::EndSave(InstEndSave::new(0)),
+            Opcode::Match,
+        ]);
+
+        for (test_id, (expected_res, input)) in tests.into_iter().enumerate() {
+            let res = run::<1>(&prog, input);
+            assert_eq!((test_id, expected_res), (test_id, res))
+        }
+    }
+
+    #[test]
+    fn should_follow_word_boundary_epsilon_transition_on_end_of_input_or_whitespace() {
+        let tests = vec![
+            (None, "baab"),
+            (Some([SaveGroupSlot::complete(1, 3)]), "baa"),
+            (Some([SaveGroupSlot::complete(2, 4)]), "baaa"),
+            (Some([SaveGroupSlot::complete(1, 3)]), "baa "),
+            (Some([SaveGroupSlot::complete(2, 4)]), "baaa "),
+        ];
+
+        // (aa\b)
+        let prog = Instructions::default().with_opcodes(vec![
+            Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
+            Opcode::Any,
+            Opcode::Jmp(InstJmp::new(InstIndex::from(0))),
+            Opcode::StartSave(InstStartSave::new(0)),
+            Opcode::Consume(InstConsume::new('a')),
+            Opcode::Consume(InstConsume::new('a')),
+            Opcode::Epsilon(InstEpsilon::new(EpsilonCond::WordBoundary)),
             Opcode::EndSave(InstEndSave::new(0)),
             Opcode::Match,
         ]);

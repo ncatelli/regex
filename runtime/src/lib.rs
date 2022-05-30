@@ -379,6 +379,17 @@ impl Opcode {
         )
     }
 
+    /// Returns true if the opcode requires lookahead for evaluation.
+    #[allow(unused)]
+    pub fn requires_lookahead(&self) -> bool {
+        matches!(
+            self,
+            Opcode::Epsilon(InstEpsilon {
+                cond: EpsilonCond::WordBoundary,
+            })
+        )
+    }
+
     /// Returns true if the opcode represents an input consuming operations
     /// that represents an explicit value or alphabet.
     #[allow(unused)]
@@ -616,7 +627,7 @@ pub enum EpsilonCond {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstEpsilon {
-    cond: EpsilonCond,
+    pub cond: EpsilonCond,
 }
 
 impl InstEpsilon {
@@ -965,12 +976,12 @@ fn add_thread<const SG: usize>(
         Opcode::Epsilon(InstEpsilon {
             cond: EpsilonCond::WordBoundary,
         }) => {
-            let lookback_is_whitespace = lookback.map(|c| c.is_whitespace()).unwrap_or(false);
-            let current_is_not_whitespace = current_char.map(|c| c.is_whitespace()).unwrap_or(true);
+            let lookback_is_whitespace = lookback.map(|c| c.is_whitespace()).unwrap_or(true);
+            let current_is_whitespace = current_char.map(|c| c.is_whitespace()).unwrap_or(true);
 
             // Place is a boundary if both lookback and current are either
             // both not whitespace or both not chars.
-            let is_boundary = current_is_not_whitespace ^ lookback_is_whitespace;
+            let is_boundary = current_is_whitespace ^ lookback_is_whitespace;
 
             if is_boundary {
                 add_thread(
@@ -982,7 +993,6 @@ fn add_thread<const SG: usize>(
                     window,
                 )
             } else {
-                thread_list.threads.push(t);
                 thread_list
             }
         }
@@ -1609,6 +1619,7 @@ mod tests {
             (Some([SaveGroupSlot::complete(0, 2)]), "aaab"),
             (Some([SaveGroupSlot::complete(1, 3)]), " aab"),
             (Some([SaveGroupSlot::complete(1, 3)]), " aaaab"),
+            (Some([SaveGroupSlot::complete(5, 7)]), "baab\naab"),
         ];
 
         // (\baa)

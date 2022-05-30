@@ -118,12 +118,12 @@ pub fn compile(regex_ast: ast::Regex) -> Result<Instructions, String> {
             (sets, absolute_insts)
         })
         .map(|(sets, insts)| {
-            let first_consuming = (insts)
+            let first_available_stop = (insts)
                 .iter()
-                .find(|opcode| opcode.is_explicit_consuming())
+                .find(|opcode| opcode.requires_lookahead() || opcode.is_explicit_consuming())
                 .cloned();
 
-            match (anchored, first_consuming) {
+            match (anchored, first_available_stop) {
                 (false, Some(Opcode::Consume(InstConsume { value }))) => {
                     Instructions::new(sets, insts).with_fast_forward(FastForward::Char(value))
                 }
@@ -131,6 +131,12 @@ pub fn compile(regex_ast: ast::Regex) -> Result<Instructions, String> {
                     let ff_set = sets[idx].clone();
                     Instructions::new(sets, insts).with_fast_forward(FastForward::Set(ff_set))
                 }
+                (
+                    false,
+                    Some(Opcode::Epsilon(InstEpsilon {
+                        cond: EpsilonCond::WordBoundary,
+                    })),
+                ) => Instructions::new(sets, insts),
                 // catch-all
                 (false, None) | (false, Some(_)) | (true, _) => Instructions::new(sets, insts),
             }

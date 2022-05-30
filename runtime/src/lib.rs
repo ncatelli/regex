@@ -835,7 +835,7 @@ fn add_thread<const SG: usize>(
     mut thread_list: Threads<SG>,
     t: Thread<SG>,
     sp: usize,
-    window: [Option<char>; 3],
+    window: [Option<char>; 2],
 ) -> Threads<SG> {
     let inst_idx = t.inst;
     let default_next_inst_idx = inst_idx + 1;
@@ -854,7 +854,7 @@ fn add_thread<const SG: usize>(
     };
 
     let opcode = &inst.opcode;
-    let [_lookback, _current_char, _lookahead] = window;
+    let [lookback, current_char] = window;
     match opcode {
         Opcode::Split(InstSplit { x_branch, y_branch }) => {
             let x = *x_branch;
@@ -952,9 +952,7 @@ fn add_thread<const SG: usize>(
             )
         }
 
-        Opcode::Epsilon(InstEpsilon {
-            cond: EpsilonCond::WordBoundary,
-        }) => add_thread(
+        Opcode::Epsilon(InstEpsilon { .. }) if window == [None, None] => add_thread(
             program,
             save_groups,
             thread_list,
@@ -962,6 +960,29 @@ fn add_thread<const SG: usize>(
             sp,
             window,
         ),
+
+        Opcode::Epsilon(InstEpsilon {
+            cond: EpsilonCond::WordBoundary,
+        }) => {
+            let lookback_is_whitespace = lookback.map(|c| c.is_whitespace()).unwrap_or(false);
+            let current_is_not_whitespace =
+                current_char.map(|c| !c.is_whitespace()).unwrap_or(false);
+
+            if current_is_not_whitespace && lookback_is_whitespace {
+                add_thread(
+                    program,
+                    save_groups,
+                    thread_list,
+                    Thread::new(t.save_groups, default_next_inst_idx),
+                    sp,
+                    window,
+                )
+            } else {
+                thread_list.threads.push(t);
+                thread_list
+            }
+        }
+
         _ => {
             thread_list.threads.push(t);
             thread_list
@@ -1003,12 +1024,12 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
         current_thread_list,
         Thread::new([SaveGroup::None; SG], InstIndex::from(0)),
         0,
-        [None, None, None],
+        [None, None],
     );
 
     let mut done = false;
     'outer: while !done && !current_thread_list.threads.is_empty() {
-        let [lookback, next_char, lookahead] = match input_iter.next() {
+        let [_lookback, next_char, lookahead] = match input_iter.next() {
             Some((idx, window)) => {
                 let lookback = window.previous();
                 // safe to assume we can unwrap this given Some is returned if next is some.
@@ -1043,7 +1064,7 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
                         next_thread_list,
                         Thread::new(thread_local_save_group, default_next_inst_idx),
                         input_idx + 1,
-                        [lookback, next_char, lookahead],
+                        [next_char, lookahead],
                     );
                 }
 
@@ -1064,7 +1085,7 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
                         next_thread_list,
                         Thread::new(thread_local_save_group, default_next_inst_idx),
                         input_idx + 1,
-                        [lookback, next_char, lookahead],
+                        [next_char, lookahead],
                     );
                 }
 
@@ -1089,7 +1110,7 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
                         next_thread_list,
                         Thread::<SG>::new(thread_local_save_group, default_next_inst_idx),
                         input_idx + 1,
-                        [lookback, next_char, lookahead],
+                        [next_char, lookahead],
                     );
                 }
 
@@ -1574,12 +1595,11 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "unimplemented"]
     fn should_follow_epsilon_transition() {
         let tests = vec![
-            //(None, "baab"),
-            //(Some([SaveGroupSlot::complete(0, 2)]), "aab"),
-            //(Some([SaveGroupSlot::complete(0, 2)]), "aaab"),
+            (None, "baab"),
+            (Some([SaveGroupSlot::complete(0, 2)]), "aab"),
+            (Some([SaveGroupSlot::complete(0, 2)]), "aaab"),
             (Some([SaveGroupSlot::complete(1, 3)]), " aab"),
             (Some([SaveGroupSlot::complete(1, 3)]), " aaaab"),
         ];

@@ -1000,11 +1000,9 @@ fn add_thread<const SG: usize>(
         Opcode::Epsilon(InstEpsilon {
             cond: EpsilonCond::EndOfString,
         }) => {
-            let end_of_input = lookahead.is_none() && lookahead.is_none();
-            let end_of_input_with_trailing_newline =
-                (lookahead == Some('\n')) && lookahead.is_none();
+            let end_of_input = lookahead.is_none();
 
-            if end_of_input_with_trailing_newline || end_of_input {
+            if end_of_input {
                 add_thread(
                     program,
                     save_groups,

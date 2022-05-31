@@ -997,6 +997,23 @@ fn add_thread<const SG: usize>(
             }
         }
 
+        Opcode::Epsilon(InstEpsilon {
+            cond: EpsilonCond::EndOfString,
+        }) => {
+            if current_char.is_none() {
+                add_thread(
+                    program,
+                    save_groups,
+                    thread_list,
+                    Thread::new(t.save_groups, default_next_inst_idx),
+                    sp,
+                    window,
+                )
+            } else {
+                thread_list
+            }
+        }
+
         // catch-all todo state
         Opcode::Epsilon(InstEpsilon { .. }) => todo!(),
 
@@ -1660,6 +1677,35 @@ mod tests {
             Opcode::Consume(InstConsume::new('a')),
             Opcode::Consume(InstConsume::new('a')),
             Opcode::Epsilon(InstEpsilon::new(EpsilonCond::WordBoundary)),
+            Opcode::EndSave(InstEndSave::new(0)),
+            Opcode::Match,
+        ]);
+
+        for (test_id, (expected_res, input)) in tests.into_iter().enumerate() {
+            let res = run::<1>(&prog, input);
+            assert_eq!((test_id, expected_res), (test_id, res))
+        }
+    }
+
+    #[test]
+    fn should_follow_epsilon_on_end_of_input() {
+        let tests = vec![
+            (None, "baab"),
+            (None, "baa "),
+            (None, "baaa "),
+            (Some([SaveGroupSlot::complete(1, 3)]), "baa"),
+            (Some([SaveGroupSlot::complete(2, 4)]), "baaa"),
+        ];
+
+        // (aa$)
+        let prog = Instructions::default().with_opcodes(vec![
+            Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
+            Opcode::Any,
+            Opcode::Jmp(InstJmp::new(InstIndex::from(0))),
+            Opcode::StartSave(InstStartSave::new(0)),
+            Opcode::Consume(InstConsume::new('a')),
+            Opcode::Consume(InstConsume::new('a')),
+            Opcode::Epsilon(InstEpsilon::new(EpsilonCond::EndOfString)),
             Opcode::EndSave(InstEndSave::new(0)),
             Opcode::Match,
         ]);

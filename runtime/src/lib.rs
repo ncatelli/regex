@@ -865,7 +865,7 @@ fn add_thread<const SG: usize>(
     };
 
     let opcode = &inst.opcode;
-    let [lookback, current_char] = window;
+    let [current_char, lookahead] = window;
     match opcode {
         Opcode::Split(InstSplit { x_branch, y_branch }) => {
             let x = *x_branch;
@@ -976,8 +976,8 @@ fn add_thread<const SG: usize>(
         Opcode::Epsilon(InstEpsilon {
             cond: EpsilonCond::WordBoundary,
         }) => {
-            let lookback_is_whitespace = lookback.map(|c| c.is_whitespace()).unwrap_or(true);
-            let current_is_whitespace = current_char.map(|c| c.is_whitespace()).unwrap_or(true);
+            let lookback_is_whitespace = current_char.map(|c| c.is_whitespace()).unwrap_or(true);
+            let current_is_whitespace = lookahead.map(|c| c.is_whitespace()).unwrap_or(true);
 
             // Place is a boundary if both lookback and current are either
             // both not whitespace or both not chars.
@@ -1000,7 +1000,11 @@ fn add_thread<const SG: usize>(
         Opcode::Epsilon(InstEpsilon {
             cond: EpsilonCond::EndOfString,
         }) => {
-            if current_char.is_none() {
+            let end_of_input = lookahead.is_none() && lookahead.is_none();
+            let end_of_input_with_trailing_newline =
+                (lookahead == Some('\n')) && lookahead.is_none();
+
+            if end_of_input_with_trailing_newline || end_of_input {
                 add_thread(
                     program,
                     save_groups,
@@ -1688,7 +1692,7 @@ mod tests {
     }
 
     #[test]
-    fn should_follow_epsilon_on_end_of_input() {
+    fn should_follow_end_of_string_epsilon_on_end_of_input() {
         let tests = vec![
             (None, "baab"),
             (None, "baa "),

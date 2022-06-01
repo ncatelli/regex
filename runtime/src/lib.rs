@@ -1056,21 +1056,16 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
     let mut sub = [SaveGroupSlot::None; SG];
 
     // input and eoi tracker.
-    let mut done = false;
-    let mut current_window = match input_iter.next() {
+    let (mut done, mut current_window) = match input_iter.next() {
         Some((idx, window)) => {
             let lookback = window.previous();
-            // safe to assume we can unwrap this given Some is returned if next is some.
-            let next = window.current().unwrap();
+            let current = window.current();
             let lookahead = window.next();
 
             input_idx = idx;
-            [lookback, Some(next), lookahead]
+            (false, [lookback, current, lookahead])
         }
-        None => {
-            done = true;
-            [None, None, None]
-        }
+        None => (true, [None, None, None]),
     };
 
     // add the initial thread
@@ -1089,11 +1084,10 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
         let (next_input_idx, next_window) = match input_iter.next() {
             Some((idx, window)) => {
                 let lookback = window.previous();
-                // safe to assume we can unwrap this given Some is returned if next is some.
-                let next = window.current().unwrap();
+                let current = window.current();
                 let lookahead = window.next();
 
-                (idx, [lookback, Some(next), lookahead])
+                (idx, [lookback, current, lookahead])
             }
             None => (input_idx + 1, [None, None, None]),
         };

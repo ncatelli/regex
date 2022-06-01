@@ -865,7 +865,7 @@ fn add_thread<const SG: usize>(
     };
 
     let opcode = &inst.opcode;
-    let [lookback, current_char, _lookahead] = window;
+    let [lookback, current_char, lookahead] = window;
     match opcode {
         Opcode::Split(InstSplit { x_branch, y_branch }) => {
             let x = *x_branch;
@@ -1000,7 +1000,8 @@ fn add_thread<const SG: usize>(
         Opcode::Epsilon(InstEpsilon {
             cond: EpsilonCond::EndOfString,
         }) => {
-            let end_of_input = current_char.is_none();
+            let end_of_input =
+                current_char.is_none() || (current_char == Some('\n') && lookahead.is_none());
 
             if end_of_input {
                 add_thread(
@@ -1715,6 +1716,8 @@ mod tests {
             (None, "baaa "),
             (Some([SaveGroupSlot::complete(1, 3)]), "baa"),
             (Some([SaveGroupSlot::complete(2, 4)]), "baaa"),
+            // match on trailing newline
+            (Some([SaveGroupSlot::complete(2, 4)]), "baaa\n"),
         ];
 
         // (aa$)

@@ -865,7 +865,7 @@ fn add_thread<const SG: usize>(
     };
 
     let opcode = &inst.opcode;
-    let [lookback, current_char, lookahead] = window;
+    let [lookback, current_char, _lookahead] = window;
     match opcode {
         Opcode::Split(InstSplit { x_branch, y_branch }) => {
             let x = *x_branch;

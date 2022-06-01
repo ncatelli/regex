@@ -846,7 +846,7 @@ fn add_thread<const SG: usize>(
     mut thread_list: Threads<SG>,
     t: Thread<SG>,
     sp: usize,
-    window: [Option<char>; 2],
+    window: [Option<char>; 3],
 ) -> Threads<SG> {
     let inst_idx = t.inst;
     let default_next_inst_idx = inst_idx + 1;
@@ -865,7 +865,7 @@ fn add_thread<const SG: usize>(
     };
 
     let opcode = &inst.opcode;
-    let [current_char, lookahead] = window;
+    let [lookback, current_char, lookahead] = window;
     match opcode {
         Opcode::Split(InstSplit { x_branch, y_branch }) => {
             let x = *x_branch;
@@ -964,7 +964,7 @@ fn add_thread<const SG: usize>(
         }
 
         // cover empty initial-state
-        Opcode::Epsilon(InstEpsilon { .. }) if window == [None, None] => add_thread(
+        Opcode::Epsilon(InstEpsilon { .. }) if window == [None, None, None] => add_thread(
             program,
             save_groups,
             thread_list,
@@ -976,8 +976,8 @@ fn add_thread<const SG: usize>(
         Opcode::Epsilon(InstEpsilon {
             cond: EpsilonCond::WordBoundary,
         }) => {
-            let lookback_is_whitespace = current_char.map(|c| c.is_whitespace()).unwrap_or(true);
-            let current_is_whitespace = lookahead.map(|c| c.is_whitespace()).unwrap_or(true);
+            let lookback_is_whitespace = lookback.map(|c| c.is_whitespace()).unwrap_or(true);
+            let current_is_whitespace = current_char.map(|c| c.is_whitespace()).unwrap_or(true);
 
             // Place is a boundary if both lookback and current are either
             // both not whitespace or both not chars.
@@ -1000,7 +1000,7 @@ fn add_thread<const SG: usize>(
         Opcode::Epsilon(InstEpsilon {
             cond: EpsilonCond::EndOfString,
         }) => {
-            let end_of_input = lookahead.is_none();
+            let end_of_input = current_char.is_none();
 
             if end_of_input {
                 add_thread(
@@ -1054,31 +1054,47 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
     let mut matches = 0;
     let mut sub = [SaveGroupSlot::None; SG];
 
+    // input and eoi tracker.
+    let mut done = false;
+    let mut current_window = match input_iter.next() {
+        Some((idx, window)) => {
+            let lookback = window.previous();
+            // safe to assume we can unwrap this given Some is returned if next is some.
+            let next = window.current().unwrap();
+            let lookahead = window.next();
+
+            input_idx = idx;
+            [lookback, Some(next), lookahead]
+        }
+        None => {
+            done = true;
+            [None, None, None]
+        }
+    };
+
+    // add the initial thread
     current_thread_list = add_thread(
         instructions,
         &mut sub,
         current_thread_list,
         Thread::new([SaveGroup::None; SG], InstIndex::from(0)),
         0,
-        [None, None],
+        current_window,
     );
 
-    let mut done = false;
     'outer: while !done && !current_thread_list.threads.is_empty() {
-        let [_lookback, next_char, lookahead] = match input_iter.next() {
+        let next_char = current_window[1];
+        done = next_char.is_none();
+        let (next_input_idx, next_window) = match input_iter.next() {
             Some((idx, window)) => {
                 let lookback = window.previous();
                 // safe to assume we can unwrap this given Some is returned if next is some.
                 let next = window.current().unwrap();
                 let lookahead = window.next();
 
-                input_idx = idx;
-                [lookback, Some(next), lookahead]
+                (idx, [lookback, Some(next), lookahead])
             }
-            None => {
-                done = true;
-                [None, None, None]
-            }
+            None => (input_idx + 1, [None, None, None]),
         };
 
         for thread in current_thread_list.threads.iter() {
@@ -1099,8 +1115,8 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
                         &mut sub,
                         next_thread_list,
                         Thread::new(thread_local_save_group, default_next_inst_idx),
-                        input_idx + 1,
-                        [next_char, lookahead],
+                        next_input_idx,
+                        next_window,
                     );
                 }
 
@@ -1120,8 +1136,8 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
                         &mut sub,
                         next_thread_list,
                         Thread::new(thread_local_save_group, default_next_inst_idx),
-                        input_idx + 1,
-                        [next_char, lookahead],
+                        next_input_idx,
+                        next_window,
                     );
                 }
 
@@ -1145,8 +1161,8 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
                         &mut sub,
                         next_thread_list,
                         Thread::<SG>::new(thread_local_save_group, default_next_inst_idx),
-                        input_idx + 1,
-                        [next_char, lookahead],
+                        next_input_idx,
+                        next_window,
                     );
                 }
 
@@ -1161,6 +1177,8 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
             }
         }
 
+        current_window = next_window;
+        input_idx = next_input_idx;
         swap(&mut current_thread_list, &mut next_thread_list);
         next_thread_list.threads.clear();
         next_thread_list.gen.clear();

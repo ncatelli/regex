@@ -973,27 +973,36 @@ fn add_thread<const SG: usize>(
             window,
         ),
 
-        Opcode::Epsilon(InstEpsilon {
-            cond: EpsilonCond::WordBoundary,
-        }) => {
-            let lookback_is_whitespace = lookback.map(|c| c.is_whitespace()).unwrap_or(true);
-            let current_is_whitespace = current_char.map(|c| c.is_whitespace()).unwrap_or(true);
+        Opcode::Epsilon(InstEpsilon { cond })
+            if matches!(cond, EpsilonCond::WordBoundary)
+                || matches!(cond, EpsilonCond::NonWordBoundary) =>
+        {
+            {
+                let lookback_is_whitespace = lookback.map(|c| c.is_whitespace()).unwrap_or(true);
+                let current_is_whitespace = current_char.map(|c| c.is_whitespace()).unwrap_or(true);
 
-            // Place is a boundary if both lookback and current are either
-            // both not whitespace or both not chars.
-            let is_boundary = current_is_whitespace ^ lookback_is_whitespace;
+                // Place is a boundary if both lookback and current are either
+                // both whitespace or both chars.
+                let is_boundary = current_is_whitespace ^ lookback_is_whitespace;
 
-            if is_boundary {
-                add_thread(
-                    program,
-                    save_groups,
-                    thread_list,
-                    Thread::new(t.save_groups, default_next_inst_idx),
-                    sp,
-                    window,
-                )
-            } else {
-                thread_list
+                match (cond, is_boundary) {
+                    (EpsilonCond::WordBoundary, true) | (EpsilonCond::NonWordBoundary, false) => {
+                        add_thread(
+                            program,
+                            save_groups,
+                            thread_list,
+                            Thread::new(t.save_groups, default_next_inst_idx),
+                            sp,
+                            window,
+                        )
+                    }
+                    (EpsilonCond::WordBoundary, false) | (EpsilonCond::NonWordBoundary, true) => {
+                        thread_list
+                    }
+
+                    // due to the above guard, no other cases should be encounterable
+                    _ => unreachable!(),
+                }
             }
         }
 
@@ -1692,6 +1701,36 @@ mod tests {
             Opcode::Consume(InstConsume::new('a')),
             Opcode::Consume(InstConsume::new('a')),
             Opcode::Epsilon(InstEpsilon::new(EpsilonCond::WordBoundary)),
+            Opcode::EndSave(InstEndSave::new(0)),
+            Opcode::Match,
+        ]);
+
+        for (test_id, (expected_res, input)) in tests.into_iter().enumerate() {
+            let res = run::<1>(&prog, input);
+            assert_eq!((test_id, expected_res), (test_id, res))
+        }
+    }
+
+    #[test]
+    fn should_follow_nonword_boundary_on_character_wrapped_matches() {
+        let tests = vec![
+            (None, "aab"),
+            (None, " aab"),
+            (Some([SaveGroupSlot::complete(1, 3)]), "baab"),
+            (Some([SaveGroupSlot::complete(1, 3)]), "aaab"),
+            (Some([SaveGroupSlot::complete(2, 4)]), " aaaab"),
+            (Some([SaveGroupSlot::complete(1, 3)]), "baab\naab"),
+        ];
+
+        // (\Baa)
+        let prog = Instructions::default().with_opcodes(vec![
+            Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
+            Opcode::Any,
+            Opcode::Jmp(InstJmp::new(InstIndex::from(0))),
+            Opcode::StartSave(InstStartSave::new(0)),
+            Opcode::Epsilon(InstEpsilon::new(EpsilonCond::NonWordBoundary)),
+            Opcode::Consume(InstConsume::new('a')),
+            Opcode::Consume(InstConsume::new('a')),
             Opcode::EndSave(InstEndSave::new(0)),
             Opcode::Match,
         ]);

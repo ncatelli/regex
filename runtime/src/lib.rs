@@ -382,12 +382,7 @@ impl Opcode {
     /// Returns true if the opcode requires lookahead for evaluation.
     #[allow(unused)]
     pub fn requires_lookahead(&self) -> bool {
-        matches!(
-            self,
-            Opcode::Epsilon(InstEpsilon {
-                cond: EpsilonCond::WordBoundary,
-            })
-        )
+        matches!(self, Opcode::Epsilon(InstEpsilon { .. }))
     }
 
     /// Returns true if the opcode represents an input consuming operations
@@ -1003,6 +998,25 @@ fn add_thread<const SG: usize>(
                     // due to the above guard, no other cases should be encounterable
                     _ => unreachable!(),
                 }
+            }
+        }
+
+        Opcode::Epsilon(InstEpsilon {
+            cond: EpsilonCond::StartOfStringOnly,
+        }) => {
+            let start_of_string = sp == 0 && lookback.is_none();
+
+            if start_of_string {
+                add_thread(
+                    program,
+                    save_groups,
+                    thread_list,
+                    Thread::new(t.save_groups, default_next_inst_idx),
+                    sp,
+                    window,
+                )
+            } else {
+                thread_list
             }
         }
 
@@ -1650,6 +1664,37 @@ mod tests {
             Some([SaveGroupSlot::complete(0, 4), SaveGroupSlot::complete(1, 4),]),
             res
         );
+    }
+
+    #[test]
+    fn should_match_start_of_string_only_anchor() {
+        let tests = vec![
+            (None, "caa"),
+            (Some([SaveGroupSlot::complete(0, 1)]), "baab"),
+            (Some([SaveGroupSlot::complete(0, 1)]), "aab"),
+            (Some([SaveGroupSlot::complete(3, 4)]), " aab"),
+            (Some([SaveGroupSlot::complete(0, 1)]), "baab\naab"),
+        ];
+
+        // ((?:\Aa)|(?:b))
+        let prog = Instructions::default().with_opcodes(vec![
+            Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
+            Opcode::Any,
+            Opcode::Jmp(InstJmp::new(InstIndex::from(0))),
+            Opcode::StartSave(InstStartSave::new(0)),
+            Opcode::Split(InstSplit::new(InstIndex::from(5), InstIndex::from(8))),
+            Opcode::Epsilon(InstEpsilon::new(EpsilonCond::StartOfStringOnly)),
+            Opcode::Consume(InstConsume::new('a')),
+            Opcode::Jmp(InstJmp::new(InstIndex::from(9))),
+            Opcode::Consume(InstConsume::new('b')),
+            Opcode::EndSave(InstEndSave::new(0)),
+            Opcode::Match,
+        ]);
+
+        for (test_id, (expected_res, input)) in tests.into_iter().enumerate() {
+            let res = run::<1>(&prog, input);
+            assert_eq!((test_id, expected_res), (test_id, res))
+        }
     }
 
     #[test]

@@ -1902,4 +1902,50 @@ mod tests {
             compile(regex_ast)
         );
     }
+
+    #[test]
+    fn should_compile_start_of_string_anchor_pattern() {
+        // reset the save group id.
+        SAVE_GROUP_ID.store(0, std::sync::atomic::Ordering::SeqCst);
+
+        // approximate to `((?:\Aa)|(?:b))`
+        let regex_ast = Regex::Unanchored(Expression(vec![SubExpression(vec![
+            SubExpressionItem::Group(Group::Capturing {
+                expression: Expression(vec![
+                    SubExpression(vec![SubExpressionItem::Group(Group::NonCapturing {
+                        expression: Expression(vec![SubExpression(vec![
+                            SubExpressionItem::Anchor(Anchor::StartOfStringOnly),
+                            SubExpressionItem::Match(Match::WithoutQuantifier {
+                                item: MatchItem::MatchCharacter(MatchCharacter(Char('a'))),
+                            }),
+                        ])]),
+                    })]),
+                    SubExpression(vec![SubExpressionItem::Group(Group::NonCapturing {
+                        expression: Expression(vec![SubExpression(vec![
+                            SubExpressionItem::Match(Match::WithoutQuantifier {
+                                item: MatchItem::MatchCharacter(MatchCharacter(Char('b'))),
+                            }),
+                        ])]),
+                    })]),
+                ]),
+            }),
+        ])]));
+
+        assert_eq!(
+            Ok(Instructions::default().with_opcodes(vec![
+                Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
+                Opcode::Any,
+                Opcode::Jmp(InstJmp::new(InstIndex::from(0))),
+                Opcode::StartSave(InstStartSave::new(0)),
+                Opcode::Split(InstSplit::new(InstIndex::from(5), InstIndex::from(8))),
+                Opcode::Epsilon(InstEpsilon::new(EpsilonCond::StartOfStringOnly)),
+                Opcode::Consume(InstConsume::new('a')),
+                Opcode::Jmp(InstJmp::new(InstIndex::from(9))),
+                Opcode::Consume(InstConsume::new('b')),
+                Opcode::EndSave(InstEndSave::new(0)),
+                Opcode::Match,
+            ])),
+            compile(regex_ast)
+        );
+    }
 }

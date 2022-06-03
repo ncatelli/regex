@@ -987,4 +987,37 @@ mod tests {
             parse(&input)
         )
     }
+
+    #[test]
+    fn should_parse_capture_start_of_string_anchor() {
+        use ast::*;
+
+        let pattern = "((?:\\Aa)|(?:b))";
+        let input = pattern.chars().enumerate().collect::<Vec<(usize, char)>>();
+
+        assert_eq!(
+            Ok(Regex::Unanchored(Expression(vec![SubExpression(vec![
+                SubExpressionItem::Group(Group::Capturing {
+                    expression: Expression(vec![
+                        SubExpression(vec![SubExpressionItem::Group(Group::NonCapturing {
+                            expression: Expression(vec![SubExpression(vec![
+                                SubExpressionItem::Anchor(Anchor::StartOfStringOnly),
+                                SubExpressionItem::Match(Match::WithoutQuantifier {
+                                    item: MatchItem::MatchCharacter(MatchCharacter(Char('a')))
+                                })
+                            ])]),
+                        }),]),
+                        SubExpression(vec![SubExpressionItem::Group(Group::NonCapturing {
+                            expression: Expression(vec![SubExpression(vec![
+                                SubExpressionItem::Match(Match::WithoutQuantifier {
+                                    item: MatchItem::MatchCharacter(MatchCharacter(Char('b')))
+                                })
+                            ])]),
+                        })])
+                    ])
+                }),
+            ])]))),
+            parse(&input)
+        )
+    }
 }

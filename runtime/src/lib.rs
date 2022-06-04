@@ -4,7 +4,9 @@ use std::fmt::{Debug, Display};
 /// Represents a defined match group for a pattern.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SaveGroupSlot {
+    /// No valid match for the slot has been found.
     None,
+    /// A valid match has been found between the exlusive range of `start..end`.
     Complete { start: usize, end: usize },
 }
 
@@ -48,14 +50,17 @@ impl Default for SaveGroupSlot {
 /// Represents a Save Group as tracked on an open thread
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SaveGroup {
+    /// No available slot has been encountered.
     None,
-    Allocated {
-        slot_id: usize,
-    },
-    Open {
-        slot_id: usize,
-        start: usize,
-    },
+    /// Represents an allocated save slot (for cases where a StartSave
+    /// operation have been encountered) but no consuming operations have
+    /// occurred for a potential match on a thread.
+    Allocated { slot_id: usize },
+    /// Represents an allocated Slot that has encountered atleast one potential
+    /// consuming match but a full match for the slot has not yet been found
+    /// (TL;DR pending EndSave).
+    Open { slot_id: usize, start: usize },
+    /// A valid match with a defined start and end has been found.
     Complete {
         slot_id: usize,
         start: usize,
@@ -64,18 +69,24 @@ pub enum SaveGroup {
 }
 
 impl SaveGroup {
+    /// Returns true if the SaveGroup is in an allocated state.
     pub fn is_allocated(&self) -> bool {
         matches!(self, Self::Allocated { .. })
     }
 
+    /// Instantiates a `SaveGroup::Allocated` for a given slot_id.
     pub fn allocated(slot_id: usize) -> Self {
         Self::Allocated { slot_id }
     }
 
+    /// Instantiates a `SaveGroup::Open` for a given slot id and start
+    /// position.
     pub fn open(slot_id: usize, start: usize) -> Self {
         Self::Open { slot_id, start }
     }
 
+    /// Instantiates a `SaveGroup::Complete` for a given slot id, start and end
+    /// position.
     pub fn complete(slot_id: usize, start: usize, end: usize) -> Self {
         Self::Complete {
             slot_id,
@@ -85,8 +96,10 @@ impl SaveGroup {
     }
 }
 
+/// A thread represents a branch in a patterns evaluation, storing that
+/// branches current save state and an instruction pointer.
 #[derive(Debug)]
-pub struct Thread<const SG: usize> {
+struct Thread<const SG: usize> {
     save_groups: [SaveGroup; SG],
     inst: InstIndex,
 }
@@ -97,8 +110,9 @@ impl<const SG: usize> Thread<SG> {
     }
 }
 
+/// Stores all active threads and a set representing the evaluation generation.
 #[derive(Debug)]
-pub struct Threads<const SG: usize> {
+struct Threads<const SG: usize> {
     gen: SparseSet,
     threads: Vec<Thread<SG>>,
 }

@@ -1530,8 +1530,6 @@ mod tests {
 
     #[test]
     fn should_compile_quantified_capturing_group() {
-        SAVE_GROUP_ID.store(0, std::sync::atomic::Ordering::SeqCst);
-
         let quantifier_and_expected_opcodes = vec![
             // approximate to `^(a)?`
             (

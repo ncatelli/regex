@@ -4,7 +4,9 @@ use std::fmt::{Debug, Display};
 /// Represents a defined match group for a pattern.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SaveGroupSlot {
+    /// No valid match for the slot has been found.
     None,
+    /// A valid match has been found between the exlusive range of `start..end`.
     Complete { start: usize, end: usize },
 }
 
@@ -48,14 +50,17 @@ impl Default for SaveGroupSlot {
 /// Represents a Save Group as tracked on an open thread
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SaveGroup {
+    /// No available slot has been encountered.
     None,
-    Allocated {
-        slot_id: usize,
-    },
-    Open {
-        slot_id: usize,
-        start: usize,
-    },
+    /// Represents an allocated save slot (for cases where a StartSave
+    /// operation have been encountered) but no consuming operations have
+    /// occurred for a potential match on a thread.
+    Allocated { slot_id: usize },
+    /// Represents an allocated Slot that has encountered atleast one potential
+    /// consuming match but a full match for the slot has not yet been found
+    /// (TL;DR pending EndSave).
+    Open { slot_id: usize, start: usize },
+    /// A valid match with a defined start and end has been found.
     Complete {
         slot_id: usize,
         start: usize,
@@ -64,18 +69,24 @@ pub enum SaveGroup {
 }
 
 impl SaveGroup {
+    /// Returns true if the SaveGroup is in an allocated state.
     pub fn is_allocated(&self) -> bool {
         matches!(self, Self::Allocated { .. })
     }
 
+    /// Instantiates a `SaveGroup::Allocated` for a given slot_id.
     pub fn allocated(slot_id: usize) -> Self {
         Self::Allocated { slot_id }
     }
 
+    /// Instantiates a `SaveGroup::Open` for a given slot id and start
+    /// position.
     pub fn open(slot_id: usize, start: usize) -> Self {
         Self::Open { slot_id, start }
     }
 
+    /// Instantiates a `SaveGroup::Complete` for a given slot id, start and end
+    /// position.
     pub fn complete(slot_id: usize, start: usize, end: usize) -> Self {
         Self::Complete {
             slot_id,
@@ -85,8 +96,10 @@ impl SaveGroup {
     }
 }
 
+/// A thread represents a branch in a patterns evaluation, storing that
+/// branches current save state and an instruction pointer.
 #[derive(Debug)]
-pub struct Thread<const SG: usize> {
+struct Thread<const SG: usize> {
     save_groups: [SaveGroup; SG],
     inst: InstIndex,
 }
@@ -97,8 +110,9 @@ impl<const SG: usize> Thread<SG> {
     }
 }
 
+/// Stores all active threads and a set representing the evaluation generation.
 #[derive(Debug)]
-pub struct Threads<const SG: usize> {
+struct Threads<const SG: usize> {
     gen: SparseSet,
     threads: Vec<Thread<SG>>,
 }
@@ -1020,11 +1034,18 @@ fn add_thread<const SG: usize>(
             }
         }
 
-        Opcode::Epsilon(InstEpsilon {
-            cond: EpsilonCond::EndOfString,
-        }) => {
-            let end_of_input =
-                current_char.is_none() || (current_char == Some('\n') && lookahead.is_none());
+        Opcode::Epsilon(InstEpsilon { cond })
+            if matches!(cond, EpsilonCond::EndOfString)
+                || matches!(cond, EpsilonCond::EndOfStringOnly)
+                || matches!(cond, EpsilonCond::EndOfStringOnlyNonNewline) =>
+        {
+            let end_of_input = match cond {
+                EpsilonCond::EndOfStringOnlyNonNewline => current_char.is_none(),
+                EpsilonCond::EndOfStringOnly | EpsilonCond::EndOfString => {
+                    current_char.is_none() || (current_char == Some('\n') && lookahead.is_none())
+                }
+                _ => unreachable!(),
+            };
 
             if end_of_input {
                 add_thread(
@@ -1807,6 +1828,36 @@ mod tests {
             Opcode::Consume(InstConsume::new('a')),
             Opcode::Consume(InstConsume::new('a')),
             Opcode::Epsilon(InstEpsilon::new(EpsilonCond::EndOfString)),
+            Opcode::EndSave(InstEndSave::new(0)),
+            Opcode::Match,
+        ]);
+
+        for (test_id, (expected_res, input)) in tests.into_iter().enumerate() {
+            let res = run::<1>(&prog, input);
+            assert_eq!((test_id, expected_res), (test_id, res))
+        }
+    }
+
+    #[test]
+    fn should_enforce_non_newline_eoi_anchor() {
+        let tests = vec![
+            (None, "baab"),
+            (None, "baa "),
+            (None, "baaa "),
+            (None, "baaa\n"),
+            (Some([SaveGroupSlot::complete(1, 3)]), "baa"),
+            (Some([SaveGroupSlot::complete(2, 4)]), "baaa"),
+        ];
+
+        // (aa$)
+        let prog = Instructions::default().with_opcodes(vec![
+            Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
+            Opcode::Any,
+            Opcode::Jmp(InstJmp::new(InstIndex::from(0))),
+            Opcode::StartSave(InstStartSave::new(0)),
+            Opcode::Consume(InstConsume::new('a')),
+            Opcode::Consume(InstConsume::new('a')),
+            Opcode::Epsilon(InstEpsilon::new(EpsilonCond::EndOfStringOnlyNonNewline)),
             Opcode::EndSave(InstEndSave::new(0)),
             Opcode::Match,
         ]);

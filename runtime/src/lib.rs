@@ -1020,11 +1020,18 @@ fn add_thread<const SG: usize>(
             }
         }
 
-        Opcode::Epsilon(InstEpsilon {
-            cond: EpsilonCond::EndOfString,
-        }) => {
-            let end_of_input =
-                current_char.is_none() || (current_char == Some('\n') && lookahead.is_none());
+        Opcode::Epsilon(InstEpsilon { cond })
+            if matches!(cond, EpsilonCond::EndOfString)
+                || matches!(cond, EpsilonCond::EndOfStringOnly)
+                || matches!(cond, EpsilonCond::EndOfStringOnlyNonNewline) =>
+        {
+            let end_of_input = match cond {
+                EpsilonCond::EndOfStringOnlyNonNewline => current_char.is_none(),
+                EpsilonCond::EndOfStringOnly | EpsilonCond::EndOfString => {
+                    current_char.is_none() || (current_char == Some('\n') && lookahead.is_none())
+                }
+                _ => unreachable!(),
+            };
 
             if end_of_input {
                 add_thread(
@@ -1807,6 +1814,36 @@ mod tests {
             Opcode::Consume(InstConsume::new('a')),
             Opcode::Consume(InstConsume::new('a')),
             Opcode::Epsilon(InstEpsilon::new(EpsilonCond::EndOfString)),
+            Opcode::EndSave(InstEndSave::new(0)),
+            Opcode::Match,
+        ]);
+
+        for (test_id, (expected_res, input)) in tests.into_iter().enumerate() {
+            let res = run::<1>(&prog, input);
+            assert_eq!((test_id, expected_res), (test_id, res))
+        }
+    }
+
+    #[test]
+    fn should_enforce_non_newline_eoi_anchor() {
+        let tests = vec![
+            (None, "baab"),
+            (None, "baa "),
+            (None, "baaa "),
+            (None, "baaa\n"),
+            (Some([SaveGroupSlot::complete(1, 3)]), "baa"),
+            (Some([SaveGroupSlot::complete(2, 4)]), "baaa"),
+        ];
+
+        // (aa$)
+        let prog = Instructions::default().with_opcodes(vec![
+            Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
+            Opcode::Any,
+            Opcode::Jmp(InstJmp::new(InstIndex::from(0))),
+            Opcode::StartSave(InstStartSave::new(0)),
+            Opcode::Consume(InstConsume::new('a')),
+            Opcode::Consume(InstConsume::new('a')),
+            Opcode::Epsilon(InstEpsilon::new(EpsilonCond::EndOfStringOnlyNonNewline)),
             Opcode::EndSave(InstEndSave::new(0)),
             Opcode::Match,
         ]);

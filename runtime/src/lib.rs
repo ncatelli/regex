@@ -1061,6 +1061,33 @@ fn add_thread<const SG: usize>(
             }
         }
 
+        Opcode::Epsilon(InstEpsilon {
+            cond: EpsilonCond::PreviousMatchEnd,
+        }) => {
+            // If the end of any matches is the current SP, return true.
+            let is_end_of_last_match = t
+                .save_groups
+                .iter()
+                .filter_map(|s| match s {
+                    SaveGroup::Complete { end, .. } => Some(*end),
+                    _ => None,
+                })
+                .any(|end_pointer| end_pointer == sp);
+
+            if is_end_of_last_match {
+                add_thread(
+                    program,
+                    save_groups,
+                    thread_list,
+                    Thread::new(t.save_groups, default_next_inst_idx),
+                    sp,
+                    window,
+                )
+            } else {
+                thread_list
+            }
+        }
+
         // catch-all todo state
         Opcode::Epsilon(InstEpsilon { .. }) => todo!(),
 
@@ -1864,6 +1891,34 @@ mod tests {
 
         for (test_id, (expected_res, input)) in tests.into_iter().enumerate() {
             let res = run::<1>(&prog, input);
+            assert_eq!((test_id, expected_res), (test_id, res))
+        }
+    }
+
+    #[test]
+    fn should_follow_end_of_last_match_epsilon() {
+        let tests = vec![
+            (None, "aa"),
+            (
+                Some([SaveGroupSlot::complete(0, 2), SaveGroupSlot::complete(0, 1)]),
+                "ab",
+            ),
+        ];
+
+        // ^((a)\Gb)
+        let prog = Instructions::default().with_opcodes(vec![
+            Opcode::StartSave(InstStartSave::new(0)),
+            Opcode::StartSave(InstStartSave::new(1)),
+            Opcode::Consume(InstConsume::new('a')),
+            Opcode::EndSave(InstEndSave::new(1)),
+            Opcode::Epsilon(InstEpsilon::new(EpsilonCond::PreviousMatchEnd)),
+            Opcode::Consume(InstConsume::new('b')),
+            Opcode::EndSave(InstEndSave::new(0)),
+            Opcode::Match,
+        ]);
+
+        for (test_id, (expected_res, input)) in tests.into_iter().enumerate() {
+            let res = run::<2>(&prog, input);
             assert_eq!((test_id, expected_res), (test_id, res))
         }
     }

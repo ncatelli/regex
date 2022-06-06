@@ -7,6 +7,7 @@
 	- [General](#general)
 		- [Examples](#examples)
 			- [Building](#building)
+	- [Usage](#usage)
 	- [Grammar](#grammar)
 	- [Acknowledgements](#acknowledgements)
 

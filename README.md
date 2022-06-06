@@ -1,10 +1,29 @@
 # regex
+## Table of Contents
+<!-- TOC -->
+
+- [regex](#regex)
+	- [Table of Contents](#table-of-contents)
+	- [General](#general)
+		- [Examples](#examples)
+			- [Building](#building)
+	- [Grammar](#grammar)
+	- [Acknowledgements](#acknowledgements)
+
+<!-- /TOC -->
+
+## General
 A regex engine based on PikeVMs.
 
-## Examples
+### Examples
 - [re](./compiler/examples/re/) - A grep-like example program.
 
-### Building
+```bash
+$> echo 'hello\ngoodbye' | target/debug/examples/re '\Bll'
+hello
+```
+
+#### Building
 ```bash
 cargo build --release --example re
 ```
@@ -16,4 +35,4 @@ The grammar can be found at [regex.ebnf](./docs/regex.ebnf) and based on excelle
 This was mostly for learning purposes and built heavily by reference from:
 
 - [Russ Cox's writeups on regexp](https://swtch.com/~rsc/regexp/)
-- [kean](https://kean.blog).
+- [kean](https://kean.blog) - For the reference grammar and introducing me to rr. 

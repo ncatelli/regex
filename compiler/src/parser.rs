@@ -18,12 +18,16 @@ impl std::fmt::Debug for ParseErr {
     }
 }
 
-pub fn parse(input: &str) -> Result<ast::Regex, ParseErr> {
-    let input: Vec<(usize, char)> = input.chars().enumerate().collect();
-    parse_enumarated_array(&input)
+/// Accepts an input representing a regex pattern, attempting to parse it into
+/// a regex AST.
+pub fn parse<S: AsRef<str>>(input: S) -> Result<ast::Regex, ParseErr> {
+    let input: Vec<(usize, char)> = input.as_ref().chars().enumerate().collect();
+    parse_enumarated_slice(&input)
 }
 
-pub fn parse_enumarated_array(input: &[(usize, char)]) -> Result<ast::Regex, ParseErr> {
+/// Accepts an enumerated slice of characters from a given input representing a
+/// regex pattern, attempting to parse it into an AST.
+pub fn parse_enumarated_slice(input: &[(usize, char)]) -> Result<ast::Regex, ParseErr> {
     regex()
         .parse(input)
         .map_err(|err| ParseErr::Undefined(format!("unspecified parse error occured: {}", err)))

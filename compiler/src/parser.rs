@@ -18,7 +18,12 @@ impl std::fmt::Debug for ParseErr {
     }
 }
 
-pub fn parse(input: &[(usize, char)]) -> Result<ast::Regex, ParseErr> {
+pub fn parse(input: &str) -> Result<ast::Regex, ParseErr> {
+    let input: Vec<(usize, char)> = input.chars().enumerate().collect();
+    parse_enumarated_array(&input)
+}
+
+pub fn parse_enumarated_array(input: &[(usize, char)]) -> Result<ast::Regex, ParseErr> {
     regex()
         .parse(input)
         .map_err(|err| ParseErr::Undefined(format!("unspecified parse error occured: {}", err)))
@@ -492,11 +497,10 @@ mod tests {
             // A recursive grouping
             "the ((red|blue) pill)",
         ]
-        .into_iter()
-        .map(|input| input.chars().enumerate().collect::<Vec<(usize, char)>>());
+        .into_iter();
 
         for input in inputs {
-            let parse_result = parse(&input);
+            let parse_result = parse(input);
             assert!(parse_result.is_ok())
         }
     }
@@ -504,7 +508,6 @@ mod tests {
     #[test]
     fn should_parse_compound_match() {
         use ast::*;
-        let input = "ab".chars().enumerate().collect::<Vec<(usize, char)>>();
 
         assert_eq!(
             Ok(Regex::Unanchored(Expression(vec![SubExpression(vec![
@@ -515,14 +518,13 @@ mod tests {
                     item: MatchItem::MatchCharacter(MatchCharacter(Char('b')))
                 }),
             ])]))),
-            parse(&input)
+            parse("ab")
         )
     }
 
     #[test]
     fn should_parse_anchored_match() {
         use ast::*;
-        let input = "^ab".chars().enumerate().collect::<Vec<(usize, char)>>();
 
         assert_eq!(
             Ok(Regex::StartOfStringAnchored(Expression(vec![
@@ -535,14 +537,13 @@ mod tests {
                     }),
                 ])
             ]))),
-            parse(&input)
+            parse("^ab")
         )
     }
 
     #[test]
     fn should_parse_alternation() {
         use ast::*;
-        let input = "^a|b".chars().enumerate().collect::<Vec<(usize, char)>>();
 
         assert_eq!(
             Ok(Regex::StartOfStringAnchored(Expression(vec![
@@ -553,7 +554,7 @@ mod tests {
                     item: MatchItem::MatchCharacter(MatchCharacter(Char('b')))
                 }),])
             ]))),
-            parse(&input)
+            parse("^a|b")
         )
     }
 
@@ -576,8 +577,6 @@ mod tests {
         ];
 
         for (expected_quantifier, input) in inputs {
-            let input = input.chars().enumerate().collect::<Vec<(usize, char)>>();
-
             assert_eq!(
                 Ok(Regex::StartOfStringAnchored(Expression(vec![
                     SubExpression(vec![SubExpressionItem::Match(Match::WithQuantifier {
@@ -585,7 +584,7 @@ mod tests {
                         quantifier: Quantifier::Eager(expected_quantifier),
                     })])
                 ]))),
-                parse(&input)
+                parse(input)
             )
         }
 
@@ -593,8 +592,6 @@ mod tests {
         let inputs = vec![(QuantifierType::MatchExactRange(Integer(2)), "^a{2}")];
 
         for (expected_quantifier, input) in inputs {
-            let input = input.chars().enumerate().collect::<Vec<(usize, char)>>();
-
             assert_eq!(
                 Ok(Regex::StartOfStringAnchored(Expression(vec![
                     SubExpression(vec![SubExpressionItem::Match(Match::WithQuantifier {
@@ -602,7 +599,7 @@ mod tests {
                         quantifier: Quantifier::Eager(expected_quantifier),
                     })])
                 ]))),
-                parse(&input)
+                parse(input)
             )
         }
     }
@@ -626,8 +623,6 @@ mod tests {
         ];
 
         for (expected_quantifier, input) in inputs {
-            let input = input.chars().enumerate().collect::<Vec<(usize, char)>>();
-
             assert_eq!(
                 Ok(Regex::StartOfStringAnchored(Expression(vec![
                     SubExpression(vec![SubExpressionItem::Match(Match::WithQuantifier {
@@ -635,7 +630,7 @@ mod tests {
                         quantifier: Quantifier::Lazy(expected_quantifier),
                     })])
                 ]))),
-                parse(&input)
+                parse(input)
             )
         }
 
@@ -643,8 +638,6 @@ mod tests {
         let inputs = vec![(QuantifierType::MatchExactRange(Integer(2)), "^a{2}?")];
 
         for (expected_quantifier, input) in inputs {
-            let input = input.chars().enumerate().collect::<Vec<(usize, char)>>();
-
             assert_eq!(
                 Ok(Regex::StartOfStringAnchored(Expression(vec![
                     SubExpression(vec![SubExpressionItem::Match(Match::WithQuantifier {
@@ -652,7 +645,7 @@ mod tests {
                         quantifier: Quantifier::Lazy(expected_quantifier),
                     })])
                 ]))),
-                parse(&input)
+                parse(input)
             )
         }
     }
@@ -723,9 +716,7 @@ mod tests {
         ];
 
         for (test_id, (input, class)) in input_output.into_iter().enumerate() {
-            let input = input.chars().enumerate().collect::<Vec<(usize, char)>>();
-
-            let res = parse(&input);
+            let res = parse(input);
             assert_eq!(
                 (
                     test_id,
@@ -773,9 +764,7 @@ mod tests {
         ];
 
         for (test_id, (input, output)) in input_output.into_iter().enumerate() {
-            let input = input.chars().enumerate().collect::<Vec<(usize, char)>>();
-
-            let res = parse(&input);
+            let res = parse(input);
             assert_eq!(
                 (
                     test_id,
@@ -808,9 +797,7 @@ mod tests {
         ];
 
         for (test_id, (input, quantifier_ty)) in input_output.into_iter().enumerate() {
-            let input = input.chars().enumerate().collect::<Vec<(usize, char)>>();
-
-            let res = parse(&input);
+            let res = parse(input);
             assert_eq!(
                 (
                     test_id,
@@ -927,9 +914,7 @@ mod tests {
         ];
 
         for (test_id, (input, expected_regex_ast)) in input_output.into_iter().enumerate() {
-            let input = input.chars().enumerate().collect::<Vec<(usize, char)>>();
-
-            let res = parse(&input);
+            let res = parse(input);
             assert_eq!((test_id, Ok(expected_regex_ast)), (test_id, res))
         }
 
@@ -950,9 +935,7 @@ mod tests {
         ];
 
         for (test_id, (input, quantifier_ty)) in input_output.into_iter().enumerate() {
-            let input = input.chars().enumerate().collect::<Vec<(usize, char)>>();
-
-            let res = parse(&input);
+            let res = parse(input);
             assert_eq!(
                 (
                     test_id,
@@ -976,7 +959,6 @@ mod tests {
     #[test]
     fn should_parse_any_match() {
         use ast::*;
-        let input = ".".chars().enumerate().collect::<Vec<(usize, char)>>();
 
         assert_eq!(
             Ok(Regex::Unanchored(Expression(vec![SubExpression(vec![
@@ -984,16 +966,13 @@ mod tests {
                     item: MatchItem::MatchAnyCharacter
                 }),
             ])]))),
-            parse(&input)
+            parse(".")
         )
     }
 
     #[test]
     fn should_parse_capture_start_of_string_anchor() {
         use ast::*;
-
-        let pattern = "((?:\\Aa)|(?:b))";
-        let input = pattern.chars().enumerate().collect::<Vec<(usize, char)>>();
 
         assert_eq!(
             Ok(Regex::Unanchored(Expression(vec![SubExpression(vec![
@@ -1017,7 +996,7 @@ mod tests {
                     ])
                 }),
             ])]))),
-            parse(&input)
+            parse("((?:\\Aa)|(?:b))")
         )
     }
 }

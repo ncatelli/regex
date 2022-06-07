@@ -20,13 +20,12 @@ fn main() -> Result<(), String> {
     let (pattern, input) = match arg_len {
         1 => args
             .get(0)
-            .map(|pattern| (pattern, io::stdin()))
+            .map(|pattern| (pattern.as_str(), io::stdin()))
             .ok_or_else(|| USAGE.to_string()),
         _ => Err(USAGE.to_string()),
     }?;
 
-    let pattern_input: Vec<(usize, char)> = pattern.chars().enumerate().collect();
-    let program = parse(&pattern_input)
+    let program = parse(pattern)
         .map_err(|e| format!("{:?}", e))
         .and_then(compile)?;
 

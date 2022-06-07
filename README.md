@@ -42,13 +42,12 @@ use regex_runtime::run;
 // Matches are exposed as `SaveGroupSlots`
 use regex_runtime::SaveGroupSlot;
 
-// All patterns must be passed as an enumerated character stream. This can be
-// any standard regex pattern.
-let pattern: Vec<(usize, char)> = "(ll)".chars().enumerate().collect();
+// A standard regex pattern to be parsed.
+let pattern = "(ll)";
 
 // Using the above `compile` and `parse` methods, the regular expresion is 
 // parsed into an evaluatable program.
-let program = parse(&pattern)
+let program = parse(pattern)
     .map_err(|e| format!("{:?}", e))
     .and_then(compile).expect("failed to parse or compile");
 

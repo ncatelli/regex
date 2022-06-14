@@ -1,4 +1,4 @@
-use parcel::parsers::character::{alphabetic, digit, expect_character};
+use parcel::parsers::character::{alphabetic, digit, expect_character, expect_str};
 use parcel::prelude::v1::*;
 
 use super::ast;

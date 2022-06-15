@@ -552,6 +552,8 @@ pub enum CharacterAlphabet {
     Explicit(Vec<char>),
     /// Represents a set of range of values i.e. `[0-9a-zA-Z]`,  etc...
     Ranges(Vec<std::ops::RangeInclusive<char>>),
+    /// Represents a unicode category.
+    UnicodeCategory(UnicodeCategory),
 }
 
 impl CharacterAlphabet {
@@ -565,6 +567,7 @@ impl CharacterAlphabet {
                 CharacterAlphabet::Explicit(explicit_chars) => {
                     explicit_chars.into_iter().map(|c| c..=c).collect()
                 }
+                CharacterAlphabet::UnicodeCategory(_) => todo!(),
             })
             .collect();
 
@@ -578,6 +581,140 @@ impl CharacterRangeSetVerifiable for CharacterAlphabet {
             CharacterAlphabet::Range(r) => r.in_set(value),
             CharacterAlphabet::Explicit(v) => v.in_set(value),
             CharacterAlphabet::Ranges(ranges) => ranges.in_set(value),
+            CharacterAlphabet::UnicodeCategory(_) => todo!(),
+        }
+    }
+}
+
+/// Represents a unicode category classifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnicodeCategory {
+    Letter,
+    LowercaseLetter,
+    UppercaseLetter,
+    TitlecaseLetter,
+    CasedLetter,
+    ModifiedLetter,
+    OtherLetter,
+    Mark,
+    NonSpacingMark,
+    SpacingCombiningMark,
+    EnclosingMark,
+    Separator,
+    SpaceSeparator,
+    LineSeparator,
+    ParagraphSeparator,
+    Symbol,
+    MathSymbol,
+    CurrencySymbol,
+    ModifierSymbol,
+    OtherSymbol,
+    Number,
+    DecimalDigitNumber,
+    LetterNumber,
+    OtherNumber,
+    Punctuation,
+    DashPunctuation,
+    OpenPunctuation,
+    ClosePunctuation,
+    InitialPunctuation,
+    FinalPunctuation,
+    ConnectorPunctuation,
+    OtherPunctuation,
+    Other,
+    Control,
+    Format,
+    PrivateUse,
+    Surrogate,
+    Unassigned,
+}
+
+impl CharacterRangeSetVerifiable for UnicodeCategory {
+    #![allow(clippy::match_like_matches_macro)]
+    fn in_set(&self, value: char) -> bool {
+        use unicode_categories::{HumanReadableCategory, UnicodeCategorizable};
+
+        let char_category =
+            if let Some(hrc) = value.unicode_category().map(HumanReadableCategory::from) {
+                hrc
+            } else {
+                return false;
+            };
+
+        match (self, char_category) {
+            (UnicodeCategory::Letter, HumanReadableCategory::LetterLowercase)
+            | (UnicodeCategory::Letter, HumanReadableCategory::LetterUppercase)
+            | (UnicodeCategory::Letter, HumanReadableCategory::LetterTitlecase)
+            | (UnicodeCategory::Letter, HumanReadableCategory::LetterModifier)
+            | (UnicodeCategory::Letter, HumanReadableCategory::LetterOther)
+            | (UnicodeCategory::LowercaseLetter, HumanReadableCategory::LetterLowercase)
+            | (UnicodeCategory::UppercaseLetter, HumanReadableCategory::LetterUppercase)
+            | (UnicodeCategory::TitlecaseLetter, HumanReadableCategory::LetterTitlecase)
+            | (UnicodeCategory::ModifiedLetter, HumanReadableCategory::LetterModifier)
+            | (UnicodeCategory::OtherLetter, HumanReadableCategory::LetterOther) => true,
+            (UnicodeCategory::Mark, HumanReadableCategory::MarkNonspacing)
+            | (UnicodeCategory::Mark, HumanReadableCategory::MarkSpacingCombining)
+            | (UnicodeCategory::Mark, HumanReadableCategory::MarkEnclosing)
+            | (UnicodeCategory::NonSpacingMark, HumanReadableCategory::MarkNonspacing)
+            | (
+                UnicodeCategory::SpacingCombiningMark,
+                HumanReadableCategory::MarkSpacingCombining,
+            )
+            | (UnicodeCategory::EnclosingMark, HumanReadableCategory::MarkEnclosing) => true,
+            (UnicodeCategory::Separator, HumanReadableCategory::SeperatorSpace)
+            | (UnicodeCategory::Separator, HumanReadableCategory::SeperatorLine)
+            | (UnicodeCategory::Separator, HumanReadableCategory::SeperatorParagraph)
+            | (UnicodeCategory::SpaceSeparator, HumanReadableCategory::SeperatorSpace)
+            | (UnicodeCategory::LineSeparator, HumanReadableCategory::SeperatorLine)
+            | (UnicodeCategory::ParagraphSeparator, HumanReadableCategory::SeperatorParagraph) => {
+                true
+            }
+            (UnicodeCategory::Symbol, HumanReadableCategory::SymbolMath)
+            | (UnicodeCategory::Symbol, HumanReadableCategory::SymbolCurrency)
+            | (UnicodeCategory::Symbol, HumanReadableCategory::SymbolModifier)
+            | (UnicodeCategory::Symbol, HumanReadableCategory::SymbolOther)
+            | (UnicodeCategory::MathSymbol, HumanReadableCategory::SymbolMath)
+            | (UnicodeCategory::CurrencySymbol, HumanReadableCategory::SymbolCurrency)
+            | (UnicodeCategory::ModifierSymbol, HumanReadableCategory::SymbolModifier)
+            | (UnicodeCategory::OtherSymbol, HumanReadableCategory::SymbolOther) => true,
+            (UnicodeCategory::Punctuation, HumanReadableCategory::PunctuationDash)
+            | (UnicodeCategory::Punctuation, HumanReadableCategory::PunctuationOpen)
+            | (UnicodeCategory::Punctuation, HumanReadableCategory::PunctuationClose)
+            | (UnicodeCategory::Punctuation, HumanReadableCategory::PunctuationInnerQuote)
+            | (UnicodeCategory::Punctuation, HumanReadableCategory::PunctuationFinalQuote)
+            | (UnicodeCategory::Punctuation, HumanReadableCategory::PunctuationConnector)
+            | (UnicodeCategory::Punctuation, HumanReadableCategory::PunctuationOther)
+            | (UnicodeCategory::DashPunctuation, HumanReadableCategory::PunctuationDash)
+            | (UnicodeCategory::OpenPunctuation, HumanReadableCategory::PunctuationOpen)
+            | (UnicodeCategory::ClosePunctuation, HumanReadableCategory::PunctuationClose)
+            | (UnicodeCategory::InitialPunctuation, HumanReadableCategory::PunctuationInnerQuote)
+            | (UnicodeCategory::FinalPunctuation, HumanReadableCategory::PunctuationFinalQuote)
+            | (
+                UnicodeCategory::ConnectorPunctuation,
+                HumanReadableCategory::PunctuationConnector,
+            )
+            | (UnicodeCategory::OtherPunctuation, HumanReadableCategory::PunctuationOther) => true,
+            (UnicodeCategory::Other, HumanReadableCategory::OtherControl)
+            | (UnicodeCategory::Other, HumanReadableCategory::OtherFormat)
+            | (UnicodeCategory::Other, HumanReadableCategory::OtherPrivateUse)
+            | (UnicodeCategory::Other, HumanReadableCategory::OtherSurrogate)
+            | (UnicodeCategory::Other, HumanReadableCategory::OtherNotAssigned)
+            | (UnicodeCategory::Control, HumanReadableCategory::OtherControl)
+            | (UnicodeCategory::Format, HumanReadableCategory::OtherFormat)
+            | (UnicodeCategory::PrivateUse, HumanReadableCategory::OtherPrivateUse)
+            | (UnicodeCategory::Surrogate, HumanReadableCategory::OtherSurrogate)
+            | (UnicodeCategory::Unassigned, HumanReadableCategory::OtherNotAssigned) => true,
+
+            (UnicodeCategory::Number, _)
+            | (UnicodeCategory::DecimalDigitNumber, _)
+            | (UnicodeCategory::LetterNumber, _)
+            | (UnicodeCategory::OtherNumber, _) => {
+                unimplemented!()
+            }
+            (UnicodeCategory::CasedLetter, _) => unimplemented!(),
+
+            // All others do not match
+            _ => false,
         }
     }
 }

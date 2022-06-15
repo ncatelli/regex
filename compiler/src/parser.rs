@@ -253,7 +253,6 @@ fn unicode_category_name<'a>(
     use parcel::{one_of, or};
 
     one_of(vec![
-        or(expect_str("Letter"), || expect_str("L")).map(|_| ast::UnicodeCategoryName::Letter),
         or(expect_str("Lowercase_Letter"), || expect_str("Ll"))
             .map(|_| ast::UnicodeCategoryName::LowercaseLetter),
         or(expect_str("Uppercase_Letter"), || expect_str("Lu"))
@@ -266,22 +265,22 @@ fn unicode_category_name<'a>(
             .map(|_| ast::UnicodeCategoryName::ModifiedLetter),
         or(expect_str("Other_Letter"), || expect_str("Lo"))
             .map(|_| ast::UnicodeCategoryName::OtherLetter),
-        or(expect_str("Mark"), || expect_str("M")).map(|_| ast::UnicodeCategoryName::Mark),
+        or(expect_str("Letter"), || expect_str("L")).map(|_| ast::UnicodeCategoryName::Letter),
         or(expect_str("Non_Spacing_Mark"), || expect_str("Mn"))
             .map(|_| ast::UnicodeCategoryName::NonSpacingMark),
         or(expect_str("Spacing_Combining_Mark"), || expect_str("Mc"))
             .map(|_| ast::UnicodeCategoryName::SpacingCombiningMark),
         or(expect_str("Enclosing_Mark"), || expect_str("Me"))
             .map(|_| ast::UnicodeCategoryName::EnclosingMark),
-        or(expect_str("Separator"), || expect_str("Z"))
-            .map(|_| ast::UnicodeCategoryName::Separator),
+        or(expect_str("Mark"), || expect_str("M")).map(|_| ast::UnicodeCategoryName::Mark),
         or(expect_str("Space_separator"), || expect_str("Zs"))
             .map(|_| ast::UnicodeCategoryName::SpaceSeparator),
         or(expect_str("Line_Separator"), || expect_str("Zl"))
             .map(|_| ast::UnicodeCategoryName::LineSeparator),
         or(expect_str("Paragraph_Separator"), || expect_str("Zp"))
             .map(|_| ast::UnicodeCategoryName::ParagraphSeparator),
-        or(expect_str("Symbol"), || expect_str("S")).map(|_| ast::UnicodeCategoryName::Symbol),
+        or(expect_str("Separator"), || expect_str("Z"))
+            .map(|_| ast::UnicodeCategoryName::Separator),
         or(expect_str("Math_Symbol"), || expect_str("Sm"))
             .map(|_| ast::UnicodeCategoryName::MathSymbol),
         or(expect_str("Currency_Symbol"), || expect_str("Sc"))
@@ -290,15 +289,14 @@ fn unicode_category_name<'a>(
             .map(|_| ast::UnicodeCategoryName::ModifierSymbol),
         or(expect_str("Other_Symbol"), || expect_str("So"))
             .map(|_| ast::UnicodeCategoryName::OtherSymbol),
-        or(expect_str("Number"), || expect_str("N")).map(|_| ast::UnicodeCategoryName::Number),
+        or(expect_str("Symbol"), || expect_str("S")).map(|_| ast::UnicodeCategoryName::Symbol),
         or(expect_str("Decimal_Digit_Number"), || expect_str("Nd"))
             .map(|_| ast::UnicodeCategoryName::DecimalDigitNumber),
         or(expect_str("Letter_Number"), || expect_str("Nl"))
             .map(|_| ast::UnicodeCategoryName::LetterNumber),
         or(expect_str("Other_Number"), || expect_str("No"))
             .map(|_| ast::UnicodeCategoryName::OtherNumber),
-        or(expect_str("Punctuation"), || expect_str("P"))
-            .map(|_| ast::UnicodeCategoryName::Punctuation),
+        or(expect_str("Number"), || expect_str("N")).map(|_| ast::UnicodeCategoryName::Number),
         or(expect_str("Dash_Punctuation"), || expect_str("Pd"))
             .map(|_| ast::UnicodeCategoryName::DashPunctuation),
         or(expect_str("Open_Punctuation"), || expect_str("Ps"))
@@ -311,7 +309,8 @@ fn unicode_category_name<'a>(
             .map(|_| ast::UnicodeCategoryName::FinalPunctuation),
         or(expect_str("Other_Punctuation"), || expect_str("Po"))
             .map(|_| ast::UnicodeCategoryName::OtherPunctuation),
-        or(expect_str("Other"), || expect_str("C")).map(|_| ast::UnicodeCategoryName::Other),
+        or(expect_str("Punctuation"), || expect_str("P"))
+            .map(|_| ast::UnicodeCategoryName::Punctuation),
         or(expect_str("Control"), || expect_str("Cc")).map(|_| ast::UnicodeCategoryName::Control),
         or(expect_str("Format"), || expect_str("Cf")).map(|_| ast::UnicodeCategoryName::Format),
         or(expect_str("Private_Use"), || expect_str("Co"))
@@ -320,6 +319,7 @@ fn unicode_category_name<'a>(
             .map(|_| ast::UnicodeCategoryName::Surrogate),
         or(expect_str("Unassigned"), || expect_str("Cn"))
             .map(|_| ast::UnicodeCategoryName::Unassigned),
+        or(expect_str("Other"), || expect_str("C")).map(|_| ast::UnicodeCategoryName::Other),
     ])
 }
 
@@ -1022,6 +1022,38 @@ mod tests {
                     ])))
                 ),
                 (test_id, res)
+            )
+        }
+    }
+
+    #[test]
+    fn should_parse_unicode_category() {
+        use ast::*;
+
+        let input_to_category_pairing = vec![
+            ("\\p{Letter}", UnicodeCategoryName::Letter),
+            ("\\p{L}", UnicodeCategoryName::Letter),
+            ("\\p{Non_Spacing_Mark}", UnicodeCategoryName::NonSpacingMark),
+            ("\\p{Mn}", UnicodeCategoryName::NonSpacingMark),
+        ];
+
+        for (test_id, (input, expected_unicode_category)) in
+            input_to_category_pairing.into_iter().enumerate()
+        {
+            assert_eq!(
+                (
+                    test_id,
+                    Ok(Regex::Unanchored(Expression(vec![SubExpression(vec![
+                        SubExpressionItem::Match(Match::WithoutQuantifier {
+                            item: MatchItem::MatchCharacterClass(
+                                MatchCharacterClass::CharacterClassFromUnicodeCategory(
+                                    CharacterClassFromUnicodeCategory(expected_unicode_category)
+                                )
+                            )
+                        }),
+                    ])])))
+                ),
+                (test_id, parse(input))
             )
         }
     }

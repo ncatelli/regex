@@ -1905,9 +1905,6 @@ mod tests {
 
     #[test]
     fn should_compile_start_of_string_anchor_pattern() {
-        // reset the save group id.
-        SAVE_GROUP_ID.store(0, std::sync::atomic::Ordering::SeqCst);
-
         // approximate to `((?:\Aa)|(?:b))`
         let regex_ast = Regex::Unanchored(Expression(vec![SubExpression(vec![
             SubExpressionItem::Group(Group::Capturing {
@@ -1930,6 +1927,9 @@ mod tests {
                 ]),
             }),
         ])]));
+
+        // reset the save group id.
+        SAVE_GROUP_ID.store(0, std::sync::atomic::Ordering::SeqCst);
 
         assert_eq!(
             Ok(Instructions::default().with_opcodes(vec![

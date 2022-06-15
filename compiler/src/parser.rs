@@ -1,4 +1,4 @@
-use parcel::parsers::character::{alphabetic, digit, expect_character, expect_str};
+use parcel::parsers::character::{digit, expect_character, expect_str};
 use parcel::prelude::v1::*;
 
 use super::ast;
@@ -250,7 +250,77 @@ fn character_class_from_unicode_category<'a>(
 
 fn unicode_category_name<'a>(
 ) -> impl parcel::Parser<'a, &'a [(usize, char)], ast::UnicodeCategoryName> {
-    letters().map(ast::UnicodeCategoryName)
+    use parcel::{one_of, or};
+
+    one_of(vec![
+        or(expect_str("Letter"), || expect_str("L")).map(|_| ast::UnicodeCategoryName::Letter),
+        or(expect_str("Lowercase_Letter"), || expect_str("Ll"))
+            .map(|_| ast::UnicodeCategoryName::LowercaseLetter),
+        or(expect_str("Uppercase_Letter"), || expect_str("Lu"))
+            .map(|_| ast::UnicodeCategoryName::UppercaseLetter),
+        or(expect_str("Titlecase_Letter"), || expect_str("Lt"))
+            .map(|_| ast::UnicodeCategoryName::TitlecaseLetter),
+        or(expect_str("Cased_Letter"), || expect_str("L&"))
+            .map(|_| ast::UnicodeCategoryName::CasedLetter),
+        or(expect_str("Modified_Letter"), || expect_str("Lm"))
+            .map(|_| ast::UnicodeCategoryName::ModifiedLetter),
+        or(expect_str("Other_Letter"), || expect_str("Lo"))
+            .map(|_| ast::UnicodeCategoryName::OtherLetter),
+        or(expect_str("Mark"), || expect_str("M")).map(|_| ast::UnicodeCategoryName::Mark),
+        or(expect_str("Non_Spacing_Mark"), || expect_str("Mn"))
+            .map(|_| ast::UnicodeCategoryName::NonSpacingMark),
+        or(expect_str("Spacing_Combining_Mark"), || expect_str("Mc"))
+            .map(|_| ast::UnicodeCategoryName::SpacingCombiningMark),
+        or(expect_str("Enclosing_Mark"), || expect_str("Me"))
+            .map(|_| ast::UnicodeCategoryName::EnclosingMark),
+        or(expect_str("Separator"), || expect_str("Z"))
+            .map(|_| ast::UnicodeCategoryName::Separator),
+        or(expect_str("Space_separator"), || expect_str("Zs"))
+            .map(|_| ast::UnicodeCategoryName::SpaceSeparator),
+        or(expect_str("Line_Separator"), || expect_str("Zl"))
+            .map(|_| ast::UnicodeCategoryName::LineSeparator),
+        or(expect_str("Paragraph_Separator"), || expect_str("Zp"))
+            .map(|_| ast::UnicodeCategoryName::ParagraphSeparator),
+        or(expect_str("Symbol"), || expect_str("S")).map(|_| ast::UnicodeCategoryName::Symbol),
+        or(expect_str("Math_Symbol"), || expect_str("Sm"))
+            .map(|_| ast::UnicodeCategoryName::MathSymbol),
+        or(expect_str("Currency_Symbol"), || expect_str("Sc"))
+            .map(|_| ast::UnicodeCategoryName::CurrencySymbol),
+        or(expect_str("Modifier_Symbol"), || expect_str("Sk"))
+            .map(|_| ast::UnicodeCategoryName::ModifierSymbol),
+        or(expect_str("Other_Symbol"), || expect_str("So"))
+            .map(|_| ast::UnicodeCategoryName::OtherSymbol),
+        or(expect_str("Number"), || expect_str("N")).map(|_| ast::UnicodeCategoryName::Number),
+        or(expect_str("Decimal_Digit_Number"), || expect_str("Nd"))
+            .map(|_| ast::UnicodeCategoryName::DecimalDigitNumber),
+        or(expect_str("Letter_Number"), || expect_str("Nl"))
+            .map(|_| ast::UnicodeCategoryName::LetterNumber),
+        or(expect_str("Other_Number"), || expect_str("No"))
+            .map(|_| ast::UnicodeCategoryName::OtherNumber),
+        or(expect_str("Punctuation"), || expect_str("P"))
+            .map(|_| ast::UnicodeCategoryName::Punctuation),
+        or(expect_str("Dash_Punctuation"), || expect_str("Pd"))
+            .map(|_| ast::UnicodeCategoryName::DashPunctuation),
+        or(expect_str("Open_Punctuation"), || expect_str("Ps"))
+            .map(|_| ast::UnicodeCategoryName::OpenPunctuation),
+        or(expect_str("Close_Punctuation"), || expect_str("Pe"))
+            .map(|_| ast::UnicodeCategoryName::ClosePunctuation),
+        or(expect_str("Initial_Punctuation"), || expect_str("Pi"))
+            .map(|_| ast::UnicodeCategoryName::InitialPunctuation),
+        or(expect_str("Final_Punctuation"), || expect_str("Pf"))
+            .map(|_| ast::UnicodeCategoryName::FinalPunctuation),
+        or(expect_str("Other_Punctuation"), || expect_str("Po"))
+            .map(|_| ast::UnicodeCategoryName::OtherPunctuation),
+        or(expect_str("Other"), || expect_str("C")).map(|_| ast::UnicodeCategoryName::Other),
+        or(expect_str("Control"), || expect_str("Cc")).map(|_| ast::UnicodeCategoryName::Control),
+        or(expect_str("Format"), || expect_str("Cf")).map(|_| ast::UnicodeCategoryName::Format),
+        or(expect_str("Private_Use"), || expect_str("Co"))
+            .map(|_| ast::UnicodeCategoryName::PrivateUse),
+        or(expect_str("Surrogate"), || expect_str("Cs"))
+            .map(|_| ast::UnicodeCategoryName::Surrogate),
+        or(expect_str("Unassigned"), || expect_str("Cn"))
+            .map(|_| ast::UnicodeCategoryName::Unassigned),
+    ])
 }
 
 fn character_range<'a>() -> impl parcel::Parser<'a, &'a [(usize, char)], ast::CharacterRange> {
@@ -435,10 +505,6 @@ fn integer<'a>() -> impl Parser<'a, &'a [(usize, char)], ast::Integer> {
             Err(e) => Err(e),
         }
     }
-}
-
-fn letters<'a>() -> impl Parser<'a, &'a [(usize, char)], ast::Letters> {
-    parcel::one_or_more(alphabetic().predicate(|c| c.is_ascii_alphabetic())).map(ast::Letters)
 }
 
 fn char<'a>() -> impl Parser<'a, &'a [(usize, char)], ast::Char> {

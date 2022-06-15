@@ -263,7 +263,46 @@ impl IsMatchCharacterClass for CharacterClassFromUnicodeCategory {}
 impl IsCharacterGroupItem for CharacterClassFromUnicodeCategory {}
 
 #[derive(Debug, PartialEq)]
-pub struct UnicodeCategoryName(pub Letters);
+pub enum UnicodeCategoryName {
+    Letter,
+    LowercaseLetter,
+    UppercaseLetter,
+    TitlecaseLetter,
+    CasedLetter,
+    ModifiedLetter,
+    OtherLetter,
+    Mark,
+    NonSpacingMark,
+    SpacingCombiningMark,
+    EnclosingMark,
+    Separator,
+    SpaceSeparator,
+    LineSeparator,
+    ParagraphSeparator,
+    Symbol,
+    MathSymbol,
+    CurrencySymbol,
+    ModifierSymbol,
+    OtherSymbol,
+    Number,
+    DecimalDigitNumber,
+    LetterNumber,
+    OtherNumber,
+    Punctuation,
+    DashPunctuation,
+    OpenPunctuation,
+    ClosePunctuation,
+    InitialPunctuation,
+    FinalPunctuation,
+    ConnectorPunctuation,
+    OtherPunctuation,
+    Other,
+    Control,
+    Format,
+    PrivateUse,
+    Surrogate,
+    Unassigned,
+}
 
 pub struct CharacterRange {
     lower_bound: Char,

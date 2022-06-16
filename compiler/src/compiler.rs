@@ -461,9 +461,13 @@ fn match_item(m: ast::Match) -> Result<RelativeOpcodes, String> {
         Match::WithoutQuantifier {
             item:
                 MatchItem::MatchCharacterClass(MatchCharacterClass::CharacterClassFromUnicodeCategory(
-                    _,
+                    ast::CharacterClassFromUnicodeCategory(category),
                 )),
-        } => unimplemented!(),
+        } => {
+            let set = unicode_category_to_character_set(category);
+
+            Ok(vec![RelativeOpcode::ConsumeSet(set)])
+        }
     }
 }
 
@@ -574,6 +578,51 @@ fn character_class_to_set(cc: ast::CharacterClass) -> CharacterSet {
         ast::CharacterClass::AnyDecimalDigit => AnyDecimalDigitClass.into(),
         ast::CharacterClass::AnyDecimalDigitInverted => AnyDecimalDigitClassInverted.into(),
     }
+}
+
+fn unicode_category_to_character_set(category: ast::UnicodeCategoryName) -> CharacterSet {
+    let runtime_category = match category {
+        ast::UnicodeCategoryName::Letter => UnicodeCategory::Letter,
+        ast::UnicodeCategoryName::LowercaseLetter => UnicodeCategory::LowercaseLetter,
+        ast::UnicodeCategoryName::UppercaseLetter => UnicodeCategory::UppercaseLetter,
+        ast::UnicodeCategoryName::TitlecaseLetter => UnicodeCategory::TitlecaseLetter,
+        ast::UnicodeCategoryName::CasedLetter => UnicodeCategory::CasedLetter,
+        ast::UnicodeCategoryName::ModifiedLetter => UnicodeCategory::ModifiedLetter,
+        ast::UnicodeCategoryName::OtherLetter => UnicodeCategory::OtherLetter,
+        ast::UnicodeCategoryName::Mark => UnicodeCategory::Mark,
+        ast::UnicodeCategoryName::NonSpacingMark => UnicodeCategory::NonSpacingMark,
+        ast::UnicodeCategoryName::SpacingCombiningMark => UnicodeCategory::SpacingCombiningMark,
+        ast::UnicodeCategoryName::EnclosingMark => UnicodeCategory::EnclosingMark,
+        ast::UnicodeCategoryName::Separator => UnicodeCategory::Separator,
+        ast::UnicodeCategoryName::SpaceSeparator => UnicodeCategory::SpaceSeparator,
+        ast::UnicodeCategoryName::LineSeparator => UnicodeCategory::LineSeparator,
+        ast::UnicodeCategoryName::ParagraphSeparator => UnicodeCategory::ParagraphSeparator,
+        ast::UnicodeCategoryName::Symbol => UnicodeCategory::Symbol,
+        ast::UnicodeCategoryName::MathSymbol => UnicodeCategory::MathSymbol,
+        ast::UnicodeCategoryName::CurrencySymbol => UnicodeCategory::CurrencySymbol,
+        ast::UnicodeCategoryName::ModifierSymbol => UnicodeCategory::ModifierSymbol,
+        ast::UnicodeCategoryName::OtherSymbol => UnicodeCategory::OtherSymbol,
+        ast::UnicodeCategoryName::Number => UnicodeCategory::Number,
+        ast::UnicodeCategoryName::DecimalDigitNumber => UnicodeCategory::DecimalDigitNumber,
+        ast::UnicodeCategoryName::LetterNumber => UnicodeCategory::LetterNumber,
+        ast::UnicodeCategoryName::OtherNumber => UnicodeCategory::OtherNumber,
+        ast::UnicodeCategoryName::Punctuation => UnicodeCategory::Punctuation,
+        ast::UnicodeCategoryName::DashPunctuation => UnicodeCategory::DashPunctuation,
+        ast::UnicodeCategoryName::OpenPunctuation => UnicodeCategory::OpenPunctuation,
+        ast::UnicodeCategoryName::ClosePunctuation => UnicodeCategory::ClosePunctuation,
+        ast::UnicodeCategoryName::InitialPunctuation => UnicodeCategory::InitialPunctuation,
+        ast::UnicodeCategoryName::FinalPunctuation => UnicodeCategory::FinalPunctuation,
+        ast::UnicodeCategoryName::ConnectorPunctuation => UnicodeCategory::ConnectorPunctuation,
+        ast::UnicodeCategoryName::OtherPunctuation => UnicodeCategory::OpenPunctuation,
+        ast::UnicodeCategoryName::Other => UnicodeCategory::Other,
+        ast::UnicodeCategoryName::Control => UnicodeCategory::Control,
+        ast::UnicodeCategoryName::Format => UnicodeCategory::Format,
+        ast::UnicodeCategoryName::PrivateUse => UnicodeCategory::PrivateUse,
+        ast::UnicodeCategoryName::Surrogate => UnicodeCategory::Surrogate,
+        ast::UnicodeCategoryName::Unassigned => UnicodeCategory::Unassigned,
+    };
+
+    CharacterSet::inclusive(CharacterAlphabet::UnicodeCategory(runtime_category))
 }
 
 /// Generates alternations from a block of relative operations.

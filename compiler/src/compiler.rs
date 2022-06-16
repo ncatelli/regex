@@ -451,13 +451,6 @@ fn match_item(m: ast::Match) -> Result<RelativeOpcodes, String> {
         },
 
         // Unicode categories
-        Match::WithQuantifier {
-            item:
-                MatchItem::MatchCharacterClass(MatchCharacterClass::CharacterClassFromUnicodeCategory(
-                    _,
-                )),
-            quantifier: _,
-        } => unimplemented!(),
         Match::WithoutQuantifier {
             item:
                 MatchItem::MatchCharacterClass(MatchCharacterClass::CharacterClassFromUnicodeCategory(
@@ -465,8 +458,60 @@ fn match_item(m: ast::Match) -> Result<RelativeOpcodes, String> {
                 )),
         } => {
             let set = unicode_category_to_character_set(category);
-
             Ok(vec![RelativeOpcode::ConsumeSet(set)])
+        }
+        Match::WithQuantifier {
+            item:
+                MatchItem::MatchCharacterClass(MatchCharacterClass::CharacterClassFromUnicodeCategory(
+                    ast::CharacterClassFromUnicodeCategory(category),
+                )),
+            quantifier,
+        } => {
+            let set = unicode_category_to_character_set(category);
+            let rel_ops = vec![RelativeOpcode::ConsumeSet(set)];
+
+            let quantified_rel_ops = match quantifier {
+                Quantifier::Eager(QuantifierType::ZeroOrOne) => {
+                    generate_range_quantifier_block!(eager, 0, 1, rel_ops)
+                }
+                Quantifier::Lazy(QuantifierType::ZeroOrOne) => {
+                    generate_range_quantifier_block!(lazy, 0, 1, rel_ops)
+                }
+                Quantifier::Eager(QuantifierType::ZeroOrMore) => {
+                    generate_range_quantifier_block!(eager, 0, rel_ops)
+                }
+                Quantifier::Lazy(QuantifierType::ZeroOrMore) => {
+                    generate_range_quantifier_block!(lazy, 0, rel_ops)
+                }
+                Quantifier::Eager(QuantifierType::OneOrMore) => {
+                    generate_range_quantifier_block!(eager, 1, rel_ops)
+                }
+                Quantifier::Lazy(QuantifierType::OneOrMore) => {
+                    generate_range_quantifier_block!(lazy, 1, rel_ops)
+                }
+                Quantifier::Lazy(QuantifierType::MatchExactRange(Integer(cnt)))
+                | Quantifier::Eager(QuantifierType::MatchExactRange(Integer(cnt))) => {
+                    let multiple_of_len = rel_ops.len() * (cnt as usize);
+
+                    rel_ops.into_iter().cycle().take(multiple_of_len).collect()
+                }
+                Quantifier::Eager(QuantifierType::MatchAtLeastRange(Integer(lower))) => {
+                    generate_range_quantifier_block!(eager, lower, rel_ops)
+                }
+                Quantifier::Lazy(QuantifierType::MatchAtLeastRange(Integer(lower))) => {
+                    generate_range_quantifier_block!(lazy, lower, rel_ops)
+                }
+                Quantifier::Eager(QuantifierType::MatchBetweenRange {
+                    lower_bound: Integer(lower),
+                    upper_bound: Integer(upper),
+                }) => generate_range_quantifier_block!(eager, lower, upper, rel_ops),
+                Quantifier::Lazy(QuantifierType::MatchBetweenRange {
+                    lower_bound: Integer(lower),
+                    upper_bound: Integer(upper),
+                }) => generate_range_quantifier_block!(lazy, lower, upper, rel_ops),
+            };
+
+            Ok(quantified_rel_ops)
         }
     }
 }

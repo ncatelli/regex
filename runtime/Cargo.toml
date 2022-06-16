@@ -15,4 +15,4 @@ harness = false
 
 [dependencies]
 collections-ext = { git = "https://github.com/ncatelli/collections-ext", branch = "main" }
-unicode-categories = { git = "https://github.com/ncatelli/unicode-categories", tag = "v0.1.0" }
+unicode-categories = { git = "https://github.com/ncatelli/unicode-categories", tag = "v0.2.0" }

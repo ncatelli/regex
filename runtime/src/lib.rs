@@ -581,7 +581,7 @@ impl CharacterRangeSetVerifiable for CharacterAlphabet {
             CharacterAlphabet::Range(r) => r.in_set(value),
             CharacterAlphabet::Explicit(v) => v.in_set(value),
             CharacterAlphabet::Ranges(ranges) => ranges.in_set(value),
-            CharacterAlphabet::UnicodeCategory(_) => todo!(),
+            CharacterAlphabet::UnicodeCategory(category) => category.in_set(value),
         }
     }
 }
@@ -652,6 +652,9 @@ impl CharacterRangeSetVerifiable for UnicodeCategory {
             | (UnicodeCategory::TitlecaseLetter, HumanReadableCategory::LetterTitlecase)
             | (UnicodeCategory::ModifiedLetter, HumanReadableCategory::LetterModifier)
             | (UnicodeCategory::OtherLetter, HumanReadableCategory::LetterOther) => true,
+            (UnicodeCategory::CasedLetter, HumanReadableCategory::LetterLowercase)
+            | (UnicodeCategory::CasedLetter, HumanReadableCategory::LetterUppercase)
+            | (UnicodeCategory::CasedLetter, HumanReadableCategory::LetterTitlecase) => true,
             (UnicodeCategory::Mark, HumanReadableCategory::MarkNonspacing)
             | (UnicodeCategory::Mark, HumanReadableCategory::MarkSpacingCombining)
             | (UnicodeCategory::Mark, HumanReadableCategory::MarkEnclosing)
@@ -661,6 +664,12 @@ impl CharacterRangeSetVerifiable for UnicodeCategory {
                 HumanReadableCategory::MarkSpacingCombining,
             )
             | (UnicodeCategory::EnclosingMark, HumanReadableCategory::MarkEnclosing) => true,
+            (UnicodeCategory::Number, HumanReadableCategory::NumberDecimalDigit)
+            | (UnicodeCategory::Number, HumanReadableCategory::NumberLetter)
+            | (UnicodeCategory::Number, HumanReadableCategory::NumberOther)
+            | (UnicodeCategory::DecimalDigitNumber, HumanReadableCategory::NumberDecimalDigit)
+            | (UnicodeCategory::LetterNumber, HumanReadableCategory::NumberLetter)
+            | (UnicodeCategory::OtherNumber, HumanReadableCategory::NumberOther) => true,
             (UnicodeCategory::Separator, HumanReadableCategory::SeperatorSpace)
             | (UnicodeCategory::Separator, HumanReadableCategory::SeperatorLine)
             | (UnicodeCategory::Separator, HumanReadableCategory::SeperatorParagraph)
@@ -704,14 +713,6 @@ impl CharacterRangeSetVerifiable for UnicodeCategory {
             | (UnicodeCategory::PrivateUse, HumanReadableCategory::OtherPrivateUse)
             | (UnicodeCategory::Surrogate, HumanReadableCategory::OtherSurrogate)
             | (UnicodeCategory::Unassigned, HumanReadableCategory::OtherNotAssigned) => true,
-
-            (UnicodeCategory::Number, _)
-            | (UnicodeCategory::DecimalDigitNumber, _)
-            | (UnicodeCategory::LetterNumber, _)
-            | (UnicodeCategory::OtherNumber, _) => {
-                unimplemented!()
-            }
-            (UnicodeCategory::CasedLetter, _) => unimplemented!(),
 
             // All others do not match
             _ => false,
@@ -1479,6 +1480,11 @@ mod tests {
                 Opcode::ConsumeSet(InstConsumeSet::member_of(7)),
             ),
             (None, Opcode::ConsumeSet(InstConsumeSet::member_of(6))),
+            (
+                Some([SaveGroupSlot::complete(0, 1)]),
+                Opcode::ConsumeSet(InstConsumeSet::member_of(8)),
+            ),
+            (None, Opcode::ConsumeSet(InstConsumeSet::member_of(9))),
         ];
 
         let input = "aab";
@@ -1494,6 +1500,12 @@ mod tests {
                     CharacterSet::exclusive(CharacterAlphabet::Range('a'..='z')),
                     CharacterSet::inclusive(CharacterAlphabet::Range('x'..='z')),
                     CharacterSet::exclusive(CharacterAlphabet::Range('x'..='z')),
+                    CharacterSet::inclusive(CharacterAlphabet::UnicodeCategory(
+                        UnicodeCategory::Letter,
+                    )),
+                    CharacterSet::exclusive(CharacterAlphabet::UnicodeCategory(
+                        UnicodeCategory::Letter,
+                    )),
                 ])
                 .with_opcodes(vec![
                     Opcode::StartSave(InstStartSave::new(0)),

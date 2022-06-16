@@ -1605,6 +1605,35 @@ mod tests {
     }
 
     #[test]
+    fn should_evaluate_eager_unicode_category_one_or_more_expression() {
+        let tests = vec![
+            (None, "123"),
+            (Some([SaveGroupSlot::complete(0, 1)]), "a12"),
+            (Some([SaveGroupSlot::complete(0, 3)]), "aab"),
+        ];
+
+        // `^\p{Letter}+`
+        let prog = Instructions::default()
+            .with_sets(vec![CharacterSet::inclusive(
+                CharacterAlphabet::UnicodeCategory(UnicodeCategory::Letter),
+            )])
+            .with_opcodes(vec![
+                Opcode::StartSave(InstStartSave::new(0)),
+                Opcode::ConsumeSet(InstConsumeSet::new(0)),
+                Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(5))),
+                Opcode::ConsumeSet(InstConsumeSet::new(0)),
+                Opcode::Jmp(InstJmp::new(InstIndex::from(2))),
+                Opcode::EndSave(InstEndSave::new(0)),
+                Opcode::Match,
+            ]);
+
+        for (case_id, (expected_res, input)) in tests.into_iter().enumerate() {
+            let res = run::<1>(&prog, input);
+            assert_eq!((case_id, expected_res), (case_id, res));
+        }
+    }
+
+    #[test]
     fn should_evaluate_consecutive_diverging_match_expression() {
         let progs = vec![
             (

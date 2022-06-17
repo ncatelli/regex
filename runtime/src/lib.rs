@@ -552,6 +552,8 @@ pub enum CharacterAlphabet {
     Explicit(Vec<char>),
     /// Represents a set of range of values i.e. `[0-9a-zA-Z]`,  etc...
     Ranges(Vec<std::ops::RangeInclusive<char>>),
+    /// Represents a unicode category.
+    UnicodeCategory(UnicodeCategory),
 }
 
 impl CharacterAlphabet {
@@ -565,6 +567,7 @@ impl CharacterAlphabet {
                 CharacterAlphabet::Explicit(explicit_chars) => {
                     explicit_chars.into_iter().map(|c| c..=c).collect()
                 }
+                CharacterAlphabet::UnicodeCategory(_) => todo!(),
             })
             .collect();
 
@@ -578,6 +581,141 @@ impl CharacterRangeSetVerifiable for CharacterAlphabet {
             CharacterAlphabet::Range(r) => r.in_set(value),
             CharacterAlphabet::Explicit(v) => v.in_set(value),
             CharacterAlphabet::Ranges(ranges) => ranges.in_set(value),
+            CharacterAlphabet::UnicodeCategory(category) => category.in_set(value),
+        }
+    }
+}
+
+/// Represents a unicode category classifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnicodeCategory {
+    Letter,
+    LowercaseLetter,
+    UppercaseLetter,
+    TitlecaseLetter,
+    CasedLetter,
+    ModifiedLetter,
+    OtherLetter,
+    Mark,
+    NonSpacingMark,
+    SpacingCombiningMark,
+    EnclosingMark,
+    Separator,
+    SpaceSeparator,
+    LineSeparator,
+    ParagraphSeparator,
+    Symbol,
+    MathSymbol,
+    CurrencySymbol,
+    ModifierSymbol,
+    OtherSymbol,
+    Number,
+    DecimalDigitNumber,
+    LetterNumber,
+    OtherNumber,
+    Punctuation,
+    DashPunctuation,
+    OpenPunctuation,
+    ClosePunctuation,
+    InitialPunctuation,
+    FinalPunctuation,
+    ConnectorPunctuation,
+    OtherPunctuation,
+    Other,
+    Control,
+    Format,
+    PrivateUse,
+    Surrogate,
+    Unassigned,
+}
+
+impl CharacterRangeSetVerifiable for UnicodeCategory {
+    #![allow(clippy::match_like_matches_macro)]
+    fn in_set(&self, value: char) -> bool {
+        use unicode_categories::{HumanReadableCategory, UnicodeCategorizable};
+
+        let char_category =
+            if let Some(hrc) = value.unicode_category().map(HumanReadableCategory::from) {
+                hrc
+            } else {
+                return false;
+            };
+
+        match (self, char_category) {
+            (UnicodeCategory::Letter, HumanReadableCategory::LetterLowercase)
+            | (UnicodeCategory::Letter, HumanReadableCategory::LetterUppercase)
+            | (UnicodeCategory::Letter, HumanReadableCategory::LetterTitlecase)
+            | (UnicodeCategory::Letter, HumanReadableCategory::LetterModifier)
+            | (UnicodeCategory::Letter, HumanReadableCategory::LetterOther)
+            | (UnicodeCategory::LowercaseLetter, HumanReadableCategory::LetterLowercase)
+            | (UnicodeCategory::UppercaseLetter, HumanReadableCategory::LetterUppercase)
+            | (UnicodeCategory::TitlecaseLetter, HumanReadableCategory::LetterTitlecase)
+            | (UnicodeCategory::ModifiedLetter, HumanReadableCategory::LetterModifier)
+            | (UnicodeCategory::OtherLetter, HumanReadableCategory::LetterOther) => true,
+            (UnicodeCategory::CasedLetter, HumanReadableCategory::LetterLowercase)
+            | (UnicodeCategory::CasedLetter, HumanReadableCategory::LetterUppercase)
+            | (UnicodeCategory::CasedLetter, HumanReadableCategory::LetterTitlecase) => true,
+            (UnicodeCategory::Mark, HumanReadableCategory::MarkNonspacing)
+            | (UnicodeCategory::Mark, HumanReadableCategory::MarkSpacingCombining)
+            | (UnicodeCategory::Mark, HumanReadableCategory::MarkEnclosing)
+            | (UnicodeCategory::NonSpacingMark, HumanReadableCategory::MarkNonspacing)
+            | (
+                UnicodeCategory::SpacingCombiningMark,
+                HumanReadableCategory::MarkSpacingCombining,
+            )
+            | (UnicodeCategory::EnclosingMark, HumanReadableCategory::MarkEnclosing) => true,
+            (UnicodeCategory::Number, HumanReadableCategory::NumberDecimalDigit)
+            | (UnicodeCategory::Number, HumanReadableCategory::NumberLetter)
+            | (UnicodeCategory::Number, HumanReadableCategory::NumberOther)
+            | (UnicodeCategory::DecimalDigitNumber, HumanReadableCategory::NumberDecimalDigit)
+            | (UnicodeCategory::LetterNumber, HumanReadableCategory::NumberLetter)
+            | (UnicodeCategory::OtherNumber, HumanReadableCategory::NumberOther) => true,
+            (UnicodeCategory::Separator, HumanReadableCategory::SeperatorSpace)
+            | (UnicodeCategory::Separator, HumanReadableCategory::SeperatorLine)
+            | (UnicodeCategory::Separator, HumanReadableCategory::SeperatorParagraph)
+            | (UnicodeCategory::SpaceSeparator, HumanReadableCategory::SeperatorSpace)
+            | (UnicodeCategory::LineSeparator, HumanReadableCategory::SeperatorLine)
+            | (UnicodeCategory::ParagraphSeparator, HumanReadableCategory::SeperatorParagraph) => {
+                true
+            }
+            (UnicodeCategory::Symbol, HumanReadableCategory::SymbolMath)
+            | (UnicodeCategory::Symbol, HumanReadableCategory::SymbolCurrency)
+            | (UnicodeCategory::Symbol, HumanReadableCategory::SymbolModifier)
+            | (UnicodeCategory::Symbol, HumanReadableCategory::SymbolOther)
+            | (UnicodeCategory::MathSymbol, HumanReadableCategory::SymbolMath)
+            | (UnicodeCategory::CurrencySymbol, HumanReadableCategory::SymbolCurrency)
+            | (UnicodeCategory::ModifierSymbol, HumanReadableCategory::SymbolModifier)
+            | (UnicodeCategory::OtherSymbol, HumanReadableCategory::SymbolOther) => true,
+            (UnicodeCategory::Punctuation, HumanReadableCategory::PunctuationDash)
+            | (UnicodeCategory::Punctuation, HumanReadableCategory::PunctuationOpen)
+            | (UnicodeCategory::Punctuation, HumanReadableCategory::PunctuationClose)
+            | (UnicodeCategory::Punctuation, HumanReadableCategory::PunctuationInnerQuote)
+            | (UnicodeCategory::Punctuation, HumanReadableCategory::PunctuationFinalQuote)
+            | (UnicodeCategory::Punctuation, HumanReadableCategory::PunctuationConnector)
+            | (UnicodeCategory::Punctuation, HumanReadableCategory::PunctuationOther)
+            | (UnicodeCategory::DashPunctuation, HumanReadableCategory::PunctuationDash)
+            | (UnicodeCategory::OpenPunctuation, HumanReadableCategory::PunctuationOpen)
+            | (UnicodeCategory::ClosePunctuation, HumanReadableCategory::PunctuationClose)
+            | (UnicodeCategory::InitialPunctuation, HumanReadableCategory::PunctuationInnerQuote)
+            | (UnicodeCategory::FinalPunctuation, HumanReadableCategory::PunctuationFinalQuote)
+            | (
+                UnicodeCategory::ConnectorPunctuation,
+                HumanReadableCategory::PunctuationConnector,
+            )
+            | (UnicodeCategory::OtherPunctuation, HumanReadableCategory::PunctuationOther) => true,
+            (UnicodeCategory::Other, HumanReadableCategory::OtherControl)
+            | (UnicodeCategory::Other, HumanReadableCategory::OtherFormat)
+            | (UnicodeCategory::Other, HumanReadableCategory::OtherPrivateUse)
+            | (UnicodeCategory::Other, HumanReadableCategory::OtherSurrogate)
+            | (UnicodeCategory::Other, HumanReadableCategory::OtherNotAssigned)
+            | (UnicodeCategory::Control, HumanReadableCategory::OtherControl)
+            | (UnicodeCategory::Format, HumanReadableCategory::OtherFormat)
+            | (UnicodeCategory::PrivateUse, HumanReadableCategory::OtherPrivateUse)
+            | (UnicodeCategory::Surrogate, HumanReadableCategory::OtherSurrogate)
+            | (UnicodeCategory::Unassigned, HumanReadableCategory::OtherNotAssigned) => true,
+
+            // All others do not match
+            _ => false,
         }
     }
 }
@@ -1342,6 +1480,11 @@ mod tests {
                 Opcode::ConsumeSet(InstConsumeSet::member_of(7)),
             ),
             (None, Opcode::ConsumeSet(InstConsumeSet::member_of(6))),
+            (
+                Some([SaveGroupSlot::complete(0, 1)]),
+                Opcode::ConsumeSet(InstConsumeSet::member_of(8)),
+            ),
+            (None, Opcode::ConsumeSet(InstConsumeSet::member_of(9))),
         ];
 
         let input = "aab";
@@ -1357,6 +1500,12 @@ mod tests {
                     CharacterSet::exclusive(CharacterAlphabet::Range('a'..='z')),
                     CharacterSet::inclusive(CharacterAlphabet::Range('x'..='z')),
                     CharacterSet::exclusive(CharacterAlphabet::Range('x'..='z')),
+                    CharacterSet::inclusive(CharacterAlphabet::UnicodeCategory(
+                        UnicodeCategory::Letter,
+                    )),
+                    CharacterSet::exclusive(CharacterAlphabet::UnicodeCategory(
+                        UnicodeCategory::Letter,
+                    )),
                 ])
                 .with_opcodes(vec![
                     Opcode::StartSave(InstStartSave::new(0)),
@@ -1439,6 +1588,35 @@ mod tests {
             .with_sets(vec![CharacterSet::inclusive(CharacterAlphabet::Range(
                 '0'..='9',
             ))])
+            .with_opcodes(vec![
+                Opcode::StartSave(InstStartSave::new(0)),
+                Opcode::ConsumeSet(InstConsumeSet::new(0)),
+                Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(5))),
+                Opcode::ConsumeSet(InstConsumeSet::new(0)),
+                Opcode::Jmp(InstJmp::new(InstIndex::from(2))),
+                Opcode::EndSave(InstEndSave::new(0)),
+                Opcode::Match,
+            ]);
+
+        for (case_id, (expected_res, input)) in tests.into_iter().enumerate() {
+            let res = run::<1>(&prog, input);
+            assert_eq!((case_id, expected_res), (case_id, res));
+        }
+    }
+
+    #[test]
+    fn should_evaluate_eager_unicode_category_one_or_more_expression() {
+        let tests = vec![
+            (None, "123"),
+            (Some([SaveGroupSlot::complete(0, 1)]), "a12"),
+            (Some([SaveGroupSlot::complete(0, 3)]), "aab"),
+        ];
+
+        // `^\p{Letter}+`
+        let prog = Instructions::default()
+            .with_sets(vec![CharacterSet::inclusive(
+                CharacterAlphabet::UnicodeCategory(UnicodeCategory::Letter),
+            )])
             .with_opcodes(vec![
                 Opcode::StartSave(InstStartSave::new(0)),
                 Opcode::ConsumeSet(InstConsumeSet::new(0)),

@@ -1,8 +1,32 @@
+//! Provides methods for parsing an input regex string representation into an
+//! internal AST.
+//!
+//! # Example
+//!
+//! ```
+//! use regex_compiler::ast::*;
+//! use regex_compiler::parse;
+//!
+//! assert_eq!(
+//!     Ok(Regex::Unanchored(Expression(vec![SubExpression(vec![
+//!         SubExpressionItem::Match(Match::WithoutQuantifier {
+//!             item: MatchItem::MatchCharacter(MatchCharacter(Char('a')))
+//!         }),
+//!         SubExpressionItem::Match(Match::WithoutQuantifier {
+//!             item: MatchItem::MatchCharacter(MatchCharacter(Char('b')))
+//!         }),
+//!     ])]))),
+//!     parse("ab")
+//! )
+//! ```
+
 use parcel::parsers::character::{digit, expect_character, expect_str};
 use parcel::prelude::v1::*;
 
 use super::ast;
 
+/// Represents an error stemming from parsing of an input string into a regex
+/// AST.
 #[derive(PartialEq)]
 pub enum ParseErr {
     InvalidRegex,
@@ -20,14 +44,54 @@ impl std::fmt::Debug for ParseErr {
 
 /// Accepts an input representing a regex pattern, attempting to parse it into
 /// a regex AST.
+///
+/// # Example
+///
+/// ```
+/// use regex_compiler::ast::*;
+/// use regex_compiler::parse;
+///
+/// assert_eq!(
+///     Ok(Regex::Unanchored(Expression(vec![SubExpression(vec![
+///         SubExpressionItem::Match(Match::WithoutQuantifier {
+///             item: MatchItem::MatchCharacter(MatchCharacter(Char('a')))
+///         }),
+///         SubExpressionItem::Match(Match::WithoutQuantifier {
+///             item: MatchItem::MatchCharacter(MatchCharacter(Char('b')))
+///         }),
+///     ])]))),
+///     parse("ab")
+/// )
+/// ```
 pub fn parse<S: AsRef<str>>(input: S) -> Result<ast::Regex, ParseErr> {
     let input: Vec<(usize, char)> = input.as_ref().chars().enumerate().collect();
-    parse_enumarated_slice(&input)
+    parse_enumerated_slice(&input)
 }
 
 /// Accepts an enumerated slice of characters from a given input representing a
 /// regex pattern, attempting to parse it into an AST.
-pub fn parse_enumarated_slice(input: &[(usize, char)]) -> Result<ast::Regex, ParseErr> {
+///
+/// # Example
+///
+/// ```
+/// use regex_compiler::ast::*;
+/// use regex_compiler::parser::parse_enumerated_slice;
+///
+/// let input: Vec<(usize, char)> = "ab".chars().enumerate().collect();
+///
+/// assert_eq!(
+///     Ok(Regex::Unanchored(Expression(vec![SubExpression(vec![
+///         SubExpressionItem::Match(Match::WithoutQuantifier {
+///             item: MatchItem::MatchCharacter(MatchCharacter(Char('a')))
+///         }),
+///         SubExpressionItem::Match(Match::WithoutQuantifier {
+///             item: MatchItem::MatchCharacter(MatchCharacter(Char('b')))
+///         }),
+///     ])]))),
+///     parse_enumerated_slice(&input)
+/// )
+/// ```
+pub fn parse_enumerated_slice(input: &[(usize, char)]) -> Result<ast::Regex, ParseErr> {
     regex()
         .parse(input)
         .map_err(|err| ParseErr::Undefined(format!("unspecified parse error occured: {}", err)))
@@ -467,22 +531,13 @@ fn anchor_end_of_string<'a>() -> impl Parser<'a, &'a [(usize, char)], ast::Ancho
 fn integer<'a>() -> impl Parser<'a, &'a [(usize, char)], ast::Integer> {
     move |input: &'a [(usize, char)]| {
         let preparsed_input = input;
-        let res = parcel::join(
-            expect_character('-').optional(),
-            parcel::one_or_more(digit(10)),
-        )
-        .map(|(negative, digits)| {
-            let vd: String = match negative {
-                Some(_) => "-",
-                None => "",
-            }
-            .chars()
-            .chain(digits.into_iter())
-            .collect();
+        let res = parcel::one_or_more(digit(10))
+            .map(|digits| {
+                let vd: String = digits.into_iter().collect();
 
-            vd.parse::<isize>()
-        })
-        .parse(input);
+                vd.parse::<usize>()
+            })
+            .parse(input);
 
         match res {
             Ok(MatchStatus::Match {

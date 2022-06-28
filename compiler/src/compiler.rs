@@ -1,3 +1,36 @@
+//! Provides methods and types to facilitate the compilation of a parsed regex
+//! ast into runtime bytecode.
+//!
+//! # Example
+//!
+//! ```
+//! use regex_compiler::ast::*;
+//! use regex_runtime::*;
+//! use regex_compiler::compile;
+//!
+//! // approximate to `ab`
+//! let regex_ast = Regex::Unanchored(Expression(vec![SubExpression(vec![
+//!     SubExpressionItem::Match(Match::WithoutQuantifier {
+//!         item: MatchItem::MatchCharacter(MatchCharacter(Char('a'))),
+//!      }),
+//!      SubExpressionItem::Match(Match::WithoutQuantifier {
+//!          item: MatchItem::MatchCharacter(MatchCharacter(Char('b'))),
+//!     }),
+//! ])]));
+//!
+//! assert_eq!(
+//!     Ok(Instructions::default()
+//!         .with_opcodes(vec![
+//!             Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
+//!             Opcode::Any,
+//!             Opcode::Jmp(InstJmp::new(InstIndex::from(0))),
+//!             Opcode::Consume(InstConsume::new('a')),
+//!             Opcode::Consume(InstConsume::new('b')),
+//!             Opcode::Match,
+//!         ]).with_fast_forward(FastForward::Char('a'))),
+//!     compile(regex_ast)
+//! )
+//! ```
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::ast;
@@ -74,6 +107,39 @@ impl RelativeOpcode {
 
 type RelativeOpcodes = Vec<RelativeOpcode>;
 
+/// Accepts a parsed AST and attempts to compile it into a runnable bytecode
+/// program for use with the regex-runtime crate.
+///
+/// # Example
+///
+/// ```
+/// use regex_compiler::ast::*;
+/// use regex_runtime::*;
+/// use regex_compiler::compile;
+///
+/// // approximate to `ab`
+/// let regex_ast = Regex::Unanchored(Expression(vec![SubExpression(vec![
+///     SubExpressionItem::Match(Match::WithoutQuantifier {
+///         item: MatchItem::MatchCharacter(MatchCharacter(Char('a'))),
+///      }),
+///      SubExpressionItem::Match(Match::WithoutQuantifier {
+///          item: MatchItem::MatchCharacter(MatchCharacter(Char('b'))),
+///     }),
+/// ])]));
+///
+/// assert_eq!(
+///     Ok(Instructions::default()
+///         .with_opcodes(vec![
+///             Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
+///             Opcode::Any,
+///             Opcode::Jmp(InstJmp::new(InstIndex::from(0))),
+///             Opcode::Consume(InstConsume::new('a')),
+///             Opcode::Consume(InstConsume::new('b')),
+///             Opcode::Match,
+///         ]).with_fast_forward(FastForward::Char('a'))),
+///     compile(regex_ast)
+/// )
+/// ```
 pub fn compile(regex_ast: ast::Regex) -> Result<Instructions, String> {
     let suffix = [RelativeOpcode::Match];
 

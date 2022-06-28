@@ -47,7 +47,7 @@ impl Default for SaveGroupSlot {
     }
 }
 
-/// Represents a Save Group as tracked on an open thread
+/// Represents a Save Group as tracked on an open thread.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SaveGroup {
     /// No available slot has been encountered.

@@ -531,22 +531,13 @@ fn anchor_end_of_string<'a>() -> impl Parser<'a, &'a [(usize, char)], ast::Ancho
 fn integer<'a>() -> impl Parser<'a, &'a [(usize, char)], ast::Integer> {
     move |input: &'a [(usize, char)]| {
         let preparsed_input = input;
-        let res = parcel::join(
-            expect_character('-').optional(),
-            parcel::one_or_more(digit(10)),
-        )
-        .map(|(negative, digits)| {
-            let vd: String = match negative {
-                Some(_) => "-",
-                None => "",
-            }
-            .chars()
-            .chain(digits.into_iter())
-            .collect();
+        let res = parcel::one_or_more(digit(10))
+            .map(|digits| {
+                let vd: String = digits.into_iter().collect();
 
-            vd.parse::<isize>()
-        })
-        .parse(input);
+                vd.parse::<usize>()
+            })
+            .parse(input);
 
         match res {
             Ok(MatchStatus::Match {

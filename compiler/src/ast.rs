@@ -220,11 +220,11 @@ pub struct CharacterGroupNegativeModifier;
 pub enum CharacterGroupItem {
     /// A character class, `\d` or `\w`.
     CharacterClass(CharacterClass),
-    /// A unicode category, `[\p{Letter}]`
+    /// A unicode category, `[\p{Letter}]`.
     CharacterClassFromUnicodeCategory(UnicodeCategoryName),
     /// A range of characters, `[0-9]` or `[a-z]`.
     CharacterRange(Char, Char),
-    /// A single character, `[a]
+    /// A single character, `[a]`.
     Char(Char),
 }
 

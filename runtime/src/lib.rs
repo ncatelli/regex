@@ -1,3 +1,39 @@
+//! Provides a runtime evaluator for a compiled regex bytecode.
+//!
+//! # Example
+//!
+//! ```
+//! use regex_runtime::*;
+//!
+//! let progs = vec![
+//!     (
+//!         Some([SaveGroupSlot::complete(0, 1)]),
+//!         Instructions::default().with_opcodes(vec![
+//!             Opcode::StartSave(InstStartSave::new(0)),
+//!             Opcode::Consume(InstConsume::new('a')),
+//!             Opcode::EndSave(InstEndSave::new(0)),
+//!             Opcode::Match,
+//!         ]),
+//!     ),
+//!     (
+//!         None,
+//!         Instructions::default().with_opcodes(vec![
+//!             Opcode::StartSave(InstStartSave::new(0)),
+//!             Opcode::Consume(InstConsume::new('b')),
+//!             Opcode::EndSave(InstEndSave::new(0)),
+//!             Opcode::Match,
+//!         ]),
+//!     ),
+//! ];
+//!
+//! let input = "aab";
+//!
+//! for (expected_res, prog) in progs {
+//!     let res = run::<1>(&prog, input);
+//!     assert_eq!(expected_res, res)
+//! }
+//! ```
+
 use collections_ext::set::sparse::SparseSet;
 use std::fmt::{Debug, Display};
 
@@ -33,7 +69,6 @@ impl From<SaveGroup> for SaveGroupSlot {
     fn from(src: SaveGroup) -> Self {
         match src {
             SaveGroup::None => SaveGroupSlot::None,
-
             SaveGroup::Allocated { .. } => SaveGroupSlot::None,
             SaveGroup::Open { .. } => SaveGroupSlot::None,
             SaveGroup::Complete { start, end, .. } => SaveGroupSlot::Complete { start, end },
@@ -137,10 +172,15 @@ impl<const SG: usize> Default for Threads<SG> {
     }
 }
 
+/// Representative the first consuming match that the runtime can fast-forward
+/// to in an input.
 #[derive(Debug, PartialEq)]
 pub enum FastForward {
+    /// Represents a single character.
     Char(char),
+    /// Represents a set of characters that could be consuming.
     Set(CharacterSet),
+    /// Represents that no fast-forward should be performed.
     None,
 }
 
@@ -150,6 +190,9 @@ impl Default for FastForward {
     }
 }
 
+/// Represents a runtime program, consisting of all character sets referenced
+/// in an evaluation, all instructions in the program and whether the runtime
+/// can fast-forward through an input.
 #[derive(Default, Debug, PartialEq)]
 pub struct Instructions {
     pub sets: Vec<CharacterSet>,
@@ -158,6 +201,8 @@ pub struct Instructions {
 }
 
 impl Instructions {
+    /// Instantiates a program from a predefined list of operations and
+    /// character sets. By default fast_forward is disabled.
     #[must_use]
     pub fn new(sets: Vec<CharacterSet>, program: Vec<Opcode>) -> Self {
         Self {
@@ -171,6 +216,8 @@ impl Instructions {
         }
     }
 
+    /// Modifies a program, assigning a new set of opcodes to a program after
+    /// up-converting it to a list of instructions.
     pub fn with_opcodes(self, program: Vec<Opcode>) -> Self {
         Self {
             sets: self.sets,
@@ -183,6 +230,7 @@ impl Instructions {
         }
     }
 
+    /// Modifies a program, assigning a new list of instructions.
     pub fn with_instructions(self, program: Vec<Instruction>) -> Self {
         Self {
             sets: self.sets,
@@ -191,6 +239,7 @@ impl Instructions {
         }
     }
 
+    /// Modifies a program, assigning a new list of character sets.
     pub fn with_sets(self, sets: Vec<CharacterSet>) -> Self {
         Self {
             sets,
@@ -199,6 +248,7 @@ impl Instructions {
         }
     }
 
+    /// Modifies a program, assigning a new fast-forward setting.
     pub fn with_fast_forward(self, fast_forward: FastForward) -> Self {
         Self {
             sets: self.sets,
@@ -239,7 +289,7 @@ impl Instructions {
 impl Display for Instructions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for inst in self.program.iter() {
-            writeln!(f, "{:04}: {}", inst.id, inst.opcode)?
+            writeln!(f, "{:04}: {}", inst.offset, inst.opcode)?
         }
 
         Ok(())
@@ -274,6 +324,7 @@ impl From<Instructions> for (FastForward, Vec<CharacterSet>, Vec<Instruction>) {
     }
 }
 
+/// A wrapper-type providing a program counter into the runtime program.
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InstIndex(u32);
@@ -316,17 +367,19 @@ impl std::ops::Add<Self> for InstIndex {
     }
 }
 
+/// A runtime instruction, containing an offset and a corresponding instruction.
 #[derive(Debug, PartialEq)]
 pub struct Instruction {
     // A unique identifier for a given instruction
-    pub id: usize,
+    pub offset: usize,
     pub opcode: Opcode,
 }
 
 impl Instruction {
+    /// Instantiates a new instruction from its constituent parts.
     #[must_use]
-    pub fn new(id: usize, opcode: Opcode) -> Self {
-        Self { id, opcode }
+    pub fn new(offset: usize, opcode: Opcode) -> Self {
+        Self { offset, opcode }
     }
 
     /// Returns the Instruction's enclosed Opcode.
@@ -354,7 +407,7 @@ impl AsRef<Opcode> for Instruction {
 
 impl From<Instruction> for (usize, Opcode) {
     fn from(inst: Instruction) -> Self {
-        (inst.id, inst.opcode)
+        (inst.offset, inst.opcode)
     }
 }
 
@@ -366,20 +419,36 @@ impl From<(usize, Opcode)> for Instruction {
 
 impl Display for Instruction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:04}: {}", self.id, self.opcode)
+        write!(f, "{:04}: {}", self.offset, self.opcode)
     }
 }
 
+/// An enum representation of the runtime's operation set.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Opcode {
+    /// A consume operation, matching any character.
     Any,
+    /// A consume operation, matching an explicit character.
     Consume(InstConsume),
+    /// A consume operation, matching a character if it falls within the
+    /// bounds of a predefined set.
     ConsumeSet(InstConsumeSet),
+    /// A non-consuming epsilon transition. Examples of which are
+    /// lookahead/lookback operation.
     Epsilon(InstEpsilon),
+    /// A non-consuming branch operation. This forks off two threads at the
+    /// enclosed offsets.
     Split(InstSplit),
+    /// A non-consuming jump operation. This instruction modifies the program
+    /// counter in place for the current evaluating thread.
     Jmp(InstJmp),
+    /// A non-consuming operation that signifies the start of an enclosed save
+    /// group.
     StartSave(InstStartSave),
+    /// A non-consuming operation that signifies the end of an enclosed save
+    /// group.
     EndSave(InstEndSave),
+    /// A non-consuming operation that signifies a match.
     Match,
 }
 
@@ -429,10 +498,12 @@ impl Display for Opcode {
     }
 }
 
+/// A concrete representation of the Any Opcode.
 #[derive(Debug, PartialEq)]
 pub struct InstAny;
 
 impl InstAny {
+    /// Instantiates a new `InstAny`.
     pub const fn new() -> Self {
         Self
     }
@@ -450,12 +521,15 @@ impl Display for InstAny {
     }
 }
 
+/// A concrete representation of the Consume Opcode.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstConsume {
+    /// An expected unicode character required to match.
     pub value: char,
 }
 
 impl InstConsume {
+    /// Instantiates a new `InstConsume` with the expected matching char.
     #[must_use]
     pub fn new(value: char) -> Self {
         Self { value }
@@ -507,6 +581,7 @@ pub struct CharacterSet {
 }
 
 impl CharacterSet {
+    /// Instantiates an inclusive character set from a passed alphabet.
     pub fn inclusive(set: CharacterAlphabet) -> Self {
         Self {
             membership: SetMembership::Inclusive,
@@ -514,6 +589,7 @@ impl CharacterSet {
         }
     }
 
+    /// Instantiates an exclusive character set from a passed alphabet.
     pub fn exclusive(set: CharacterAlphabet) -> Self {
         Self {
             membership: SetMembership::Exclusive,
@@ -521,6 +597,7 @@ impl CharacterSet {
         }
     }
 
+    /// Inverts a character sets membership, retaining its defined alphabet.
     pub fn invert_membership(self) -> Self {
         let Self { membership, set } = self;
 
@@ -586,7 +663,7 @@ impl CharacterRangeSetVerifiable for CharacterAlphabet {
     }
 }
 
-/// Represents a unicode category classifier.
+/// Represents a unicode general category.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnicodeCategory {
     Letter,
@@ -736,14 +813,17 @@ pub enum SetMembership {
 /// characters. This functions as a brevity tool to prevent long alternations.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstConsumeSet {
+    /// A offset id to a predefined set in the current program.
     pub idx: usize,
 }
 
 impl InstConsumeSet {
+    /// Instantiate a new `InstConsumeSet` with a passed index.
     pub fn new(idx: usize) -> Self {
         Self::member_of(idx)
     }
 
+    /// An alias method to `new`
     pub fn member_of(idx: usize) -> Self {
         Self { idx }
     }
@@ -755,12 +835,37 @@ impl Display for InstConsumeSet {
     }
 }
 
+/// An internal representation of the `Split` opcode.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstSplit {
     x_branch: InstIndex,
     y_branch: InstIndex,
 }
 
+impl InstSplit {
+    /// Instantiates a new `InstSplit` from two branching program counter
+    /// values.
+    #[must_use]
+    pub fn new(x: InstIndex, y: InstIndex) -> Self {
+        Self {
+            x_branch: x,
+            y_branch: y,
+        }
+    }
+}
+
+impl Display for InstSplit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Split: ({:04}), ({:04})",
+            self.x_branch.as_u32(),
+            self.y_branch.as_u32()
+        )
+    }
+}
+
+/// A condition in which an Epsilon transition boundary can be checked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EpsilonCond {
     WordBoundary,
@@ -772,12 +877,14 @@ pub enum EpsilonCond {
     EndOfString,
 }
 
+/// An internal representation of an `Epsilon` opcode.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstEpsilon {
     pub cond: EpsilonCond,
 }
 
 impl InstEpsilon {
+    /// Instantiates a new `InstEpsilon` from a passed condition.
     pub fn new(cond: EpsilonCond) -> Self {
         Self { cond }
     }
@@ -799,33 +906,14 @@ impl Display for InstEpsilon {
     }
 }
 
-impl InstSplit {
-    #[must_use]
-    pub fn new(x: InstIndex, y: InstIndex) -> Self {
-        Self {
-            x_branch: x,
-            y_branch: y,
-        }
-    }
-}
-
-impl Display for InstSplit {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Split: ({:04}), ({:04})",
-            self.x_branch.as_u32(),
-            self.y_branch.as_u32()
-        )
-    }
-}
-
+/// An internal representation of the `Jmp` opcode.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstJmp {
     next: InstIndex,
 }
 
 impl InstJmp {
+    /// Instnatiates a new `InstJump` from a past program counter value.
     pub fn new(next: InstIndex) -> Self {
         Self { next }
     }
@@ -837,12 +925,14 @@ impl Display for InstJmp {
     }
 }
 
+/// An internal representation of the `StartSave` opcode.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstStartSave {
     slot_id: usize,
 }
 
 impl InstStartSave {
+    /// Instantiates a new `InstStartSave` from a passed slot id.
     #[must_use]
     pub fn new(slot_id: usize) -> Self {
         Self { slot_id }
@@ -855,12 +945,14 @@ impl Display for InstStartSave {
     }
 }
 
+/// An internal representation of the `EndSave` opcode.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstEndSave {
     slot_id: usize,
 }
 
 impl InstEndSave {
+    /// Instantiates a new `InstEndSave` from a passed slot id.
     #[must_use]
     pub fn new(slot_id: usize) -> Self {
         Self { slot_id }
@@ -873,6 +965,7 @@ impl Display for InstEndSave {
     }
 }
 
+/// An internal representation of the `Match` opcode.
 #[derive(Debug, PartialEq)]
 pub struct InstMatch;
 
@@ -1001,12 +1094,12 @@ fn add_thread<const SG: usize>(
     // Don't visit states we've already added.
     let inst = match program.get(inst_idx.as_usize()) {
         // if the thread is already defined, return.
-        Some(inst) if thread_list.gen.contains(&inst.id) => return thread_list,
+        Some(inst) if thread_list.gen.contains(&inst.offset) => return thread_list,
         // if it's the end of the program without a match instruction, return.
         None => return thread_list,
         // Otherwise add the new thread.
         Some(inst) => {
-            thread_list.gen.insert(inst.id);
+            thread_list.gen.insert(inst.offset);
             inst
         }
     };

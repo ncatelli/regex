@@ -374,7 +374,7 @@ impl Display for Instruction {
 ///
 /// # Safety
 /// Caller guarantees that the `N` parameter is EXACTLY half of `M` parameter.
-fn merge<const N: usize, const M: usize>(first: [u8; N], second: [u8; N]) -> [u8; M] {
+fn merge_arrays<const N: usize, const M: usize>(first: [u8; N], second: [u8; N]) -> [u8; M] {
     let mut output_arr = [0; M];
 
     for (idx, val) in first.into_iter().chain(second.into_iter()).enumerate() {
@@ -471,7 +471,7 @@ impl ToBytecode for Opcode {
             Opcode::Consume(ic) => ic.to_bytecode(),
             Opcode::ConsumeSet(ics) => ics.to_bytecode(),
             Opcode::Epsilon(ie) => ie.to_bytecode(),
-            Opcode::Split(_) => todo!(),
+            Opcode::Split(is) => is.to_bytecode(),
             Opcode::Jmp(_) => todo!(),
             Opcode::StartSave(_) => todo!(),
             Opcode::EndSave(_) => todo!(),
@@ -508,7 +508,7 @@ impl ToBytecode for InstAny {
         let first = Self::OPCODE_BINARY_REPR.to_le_bytes();
         let second = 0u64.to_le_bytes();
 
-        OpcodeBytecodeRepr(merge(first, second))
+        OpcodeBytecodeRepr(merge_arrays(first, second))
     }
 }
 
@@ -533,7 +533,7 @@ impl ToBytecode for InstConsume {
         let first = Self::OPCODE_BINARY_REPR.to_le_bytes();
         let second = char_repr.to_le_bytes();
 
-        OpcodeBytecodeRepr(merge(first, second))
+        OpcodeBytecodeRepr(merge_arrays(first, second))
     }
 }
 
@@ -693,7 +693,7 @@ impl ToBytecode for InstConsumeSet {
         let first = Self::OPCODE_BINARY_REPR.to_le_bytes();
         let second = (self.idx as u64).to_le_bytes();
 
-        OpcodeBytecodeRepr(merge(first, second))
+        OpcodeBytecodeRepr(merge_arrays(first, second))
     }
 }
 
@@ -748,7 +748,7 @@ impl ToBytecode for InstEpsilon {
         let first = Self::OPCODE_BINARY_REPR.to_le_bytes();
         let second = cond_uint_repr.to_le_bytes();
 
-        OpcodeBytecodeRepr(merge(first, second))
+        OpcodeBytecodeRepr(merge_arrays(first, second))
     }
 }
 
@@ -770,12 +770,25 @@ impl Display for InstEpsilon {
 
 impl InstSplit {
     const OPCODE_BINARY_REPR: u64 = 5;
+
     #[must_use]
     pub fn new(x: InstIndex, y: InstIndex) -> Self {
         Self {
             x_branch: x,
             y_branch: y,
         }
+    }
+}
+
+impl ToBytecode for InstSplit {
+    fn to_bytecode(&self) -> OpcodeBytecodeRepr {
+        let x_bytes = self.x_branch.as_u32().to_le_bytes();
+        let y_bytes = self.y_branch.as_u32().to_le_bytes();
+
+        let first = Self::OPCODE_BINARY_REPR.to_le_bytes();
+        let second = merge_arrays(x_bytes, y_bytes);
+
+        OpcodeBytecodeRepr(merge_arrays(first, second))
     }
 }
 
@@ -2130,6 +2143,10 @@ mod tests {
             (
                 Opcode::Epsilon(InstEpsilon::new(EpsilonCond::EndOfStringOnlyNonNewline)),
                 [4, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0],
+            ),
+            (
+                Opcode::Split(InstSplit::new(InstIndex::from(1), InstIndex::from(256))),
+                [5, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0],
             ),
         ];
 

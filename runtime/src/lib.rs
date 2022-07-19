@@ -464,10 +464,28 @@ impl Display for Opcode {
     }
 }
 
+impl ToBytecode for Opcode {
+    fn to_bytecode(&self) -> OpcodeBytecodeRepr {
+        match self {
+            Opcode::Any => InstAny.to_bytecode(),
+            Opcode::Consume(ic) => ic.to_bytecode(),
+            Opcode::ConsumeSet(ics) => ics.to_bytecode(),
+            Opcode::Epsilon(ie) => ie.to_bytecode(),
+            Opcode::Split(_) => todo!(),
+            Opcode::Jmp(_) => todo!(),
+            Opcode::StartSave(_) => todo!(),
+            Opcode::EndSave(_) => todo!(),
+            Opcode::Match => todo!(),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub struct InstAny;
 
 impl InstAny {
+    const OPCODE_BINARY_REPR: u64 = 1;
+
     pub const fn new() -> Self {
         Self
     }
@@ -487,7 +505,7 @@ impl Display for InstAny {
 
 impl ToBytecode for InstAny {
     fn to_bytecode(&self) -> OpcodeBytecodeRepr {
-        let first = 0b1_u64.to_le_bytes();
+        let first = Self::OPCODE_BINARY_REPR.to_le_bytes();
         let second = 0u64.to_le_bytes();
 
         OpcodeBytecodeRepr(merge(first, second))
@@ -500,15 +518,11 @@ pub struct InstConsume {
 }
 
 impl InstConsume {
+    const OPCODE_BINARY_REPR: u64 = 1 << 1;
+
     #[must_use]
     pub fn new(value: char) -> Self {
         Self { value }
-    }
-}
-
-impl Display for InstConsume {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Consume: {:?}", self.value)
     }
 }
 
@@ -516,10 +530,16 @@ impl ToBytecode for InstConsume {
     fn to_bytecode(&self) -> OpcodeBytecodeRepr {
         let char_repr = self.value as u64;
 
-        let first = 0b10_u64.to_le_bytes();
+        let first = Self::OPCODE_BINARY_REPR.to_le_bytes();
         let second = char_repr.to_le_bytes();
 
         OpcodeBytecodeRepr(merge(first, second))
+    }
+}
+
+impl Display for InstConsume {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Consume: {:?}", self.value)
     }
 }
 
@@ -657,12 +677,23 @@ pub struct InstConsumeSet {
 }
 
 impl InstConsumeSet {
+    const OPCODE_BINARY_REPR: u64 = 1 << 2;
+
     pub fn new(idx: usize) -> Self {
         Self::member_of(idx)
     }
 
     pub fn member_of(idx: usize) -> Self {
         Self { idx }
+    }
+}
+
+impl ToBytecode for InstConsumeSet {
+    fn to_bytecode(&self) -> OpcodeBytecodeRepr {
+        let first = Self::OPCODE_BINARY_REPR.to_le_bytes();
+        let second = (self.idx as u64).to_le_bytes();
+
+        OpcodeBytecodeRepr(merge(first, second))
     }
 }
 
@@ -695,8 +726,29 @@ pub struct InstEpsilon {
 }
 
 impl InstEpsilon {
+    const OPCODE_BINARY_REPR: u64 = 1 << 3;
+
     pub fn new(cond: EpsilonCond) -> Self {
         Self { cond }
+    }
+}
+
+impl ToBytecode for InstEpsilon {
+    fn to_bytecode(&self) -> OpcodeBytecodeRepr {
+        let cond_uint_repr: u64 = match self.cond {
+            EpsilonCond::WordBoundary => 1,
+            EpsilonCond::NonWordBoundary => 1 << 1,
+            EpsilonCond::StartOfStringOnly => 1 << 2,
+            EpsilonCond::EndOfStringOnlyNonNewline => 1 << 3,
+            EpsilonCond::EndOfStringOnly => 1 << 4,
+            EpsilonCond::PreviousMatchEnd => 1 << 5,
+            EpsilonCond::EndOfString => 1 << 6,
+        };
+
+        let first = Self::OPCODE_BINARY_REPR.to_le_bytes();
+        let second = cond_uint_repr.to_le_bytes();
+
+        OpcodeBytecodeRepr(merge(first, second))
     }
 }
 
@@ -1979,13 +2031,6 @@ mod tests {
     }
 
     #[test]
-    fn should_retain_a_fixed_opcode_size() {
-        use core::mem::size_of;
-
-        assert_eq!(16, size_of::<Opcode>())
-    }
-
-    #[test]
     fn should_print_test_instructions() {
         let prog = Instructions::default().with_opcodes(vec![
             Opcode::Consume(InstConsume::new('a')),
@@ -2047,5 +2092,46 @@ mod tests {
 
         let res = run::<1>(&prog, input);
         assert_eq!(Some(expected_res), res)
+    }
+
+    #[test]
+    fn should_retain_a_fixed_opcode_size() {
+        use core::mem::size_of;
+
+        assert_eq!(16, size_of::<Opcode>())
+    }
+
+    #[test]
+    fn should_encode_instruction_into_expected_bytecode_representation() {
+        use super::ToBytecode;
+
+        let input_output = [
+            (
+                Opcode::Any,
+                [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            ),
+            (
+                Opcode::Consume(InstConsume::new('a')),
+                [2, 0, 0, 0, 0, 0, 0, 0, 97, 0, 0, 0, 0, 0, 0, 0],
+            ),
+            (
+                Opcode::ConsumeSet(InstConsumeSet::new(2)),
+                [4, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0],
+            ),
+            (
+                Opcode::Epsilon(InstEpsilon::new(EpsilonCond::EndOfStringOnlyNonNewline)),
+                [8, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0],
+            ),
+        ];
+
+        for (test_case, (opcode, expected_output)) in input_output.into_iter().enumerate() {
+            let generated_bytecode = opcode.to_bytecode();
+            let expected_bytecode = OpcodeBytecodeRepr(expected_output);
+
+            assert_eq!(
+                (test_case, expected_bytecode),
+                (test_case, generated_bytecode)
+            );
+        }
     }
 }

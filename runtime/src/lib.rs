@@ -370,6 +370,41 @@ impl Display for Instruction {
     }
 }
 
+/// Merges two arrays.
+///
+/// # Safety
+/// Caller guarantees that the `N` parameter is EXACTLY half of `M` parameter.
+fn merge<const N: usize, const M: usize>(first: [u8; N], second: [u8; N]) -> [u8; M] {
+    let mut output_arr = [0; M];
+
+    for (idx, val) in first.into_iter().chain(second.into_iter()).enumerate() {
+        output_arr[idx] = val;
+    }
+
+    output_arr
+}
+
+/// Represents a conversion trait to a given opcode's binary little-endian
+/// representation.
+pub trait ToBytecode {
+    fn to_bytecode(&self) -> OpcodeBytecodeRepr;
+}
+
+/// Represents a conversion trait from an opcode's binary little-endian
+/// representation to its internal representation.
+pub trait FromBytecode {
+    type Error;
+    type Output;
+
+    fn from_bytecode(obr: OpcodeBytecodeRepr) -> Result<Self::Output, Self::Error>;
+}
+
+/// A wrapper type for the binary representation of an opcode in little-endian
+/// format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OpcodeBytecodeRepr([u8; 16]);
+
+/// Represents all possible operations for the runtime vm.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Opcode {
     Any,
@@ -450,6 +485,15 @@ impl Display for InstAny {
     }
 }
 
+impl ToBytecode for InstAny {
+    fn to_bytecode(&self) -> OpcodeBytecodeRepr {
+        let first = 0b1_u64.to_le_bytes();
+        let second = 0u64.to_le_bytes();
+
+        OpcodeBytecodeRepr(merge(first, second))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstConsume {
     pub value: char,
@@ -465,6 +509,17 @@ impl InstConsume {
 impl Display for InstConsume {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Consume: {:?}", self.value)
+    }
+}
+
+impl ToBytecode for InstConsume {
+    fn to_bytecode(&self) -> OpcodeBytecodeRepr {
+        let char_repr = self.value as u64;
+
+        let first = 0b10_u64.to_le_bytes();
+        let second = char_repr.to_le_bytes();
+
+        OpcodeBytecodeRepr(merge(first, second))
     }
 }
 

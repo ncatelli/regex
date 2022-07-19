@@ -737,12 +737,12 @@ impl ToBytecode for InstEpsilon {
     fn to_bytecode(&self) -> OpcodeBytecodeRepr {
         let cond_uint_repr: u64 = match self.cond {
             EpsilonCond::WordBoundary => 1,
-            EpsilonCond::NonWordBoundary => 1 << 1,
-            EpsilonCond::StartOfStringOnly => 1 << 2,
-            EpsilonCond::EndOfStringOnlyNonNewline => 1 << 3,
-            EpsilonCond::EndOfStringOnly => 1 << 4,
-            EpsilonCond::PreviousMatchEnd => 1 << 5,
-            EpsilonCond::EndOfString => 1 << 6,
+            EpsilonCond::NonWordBoundary => 1 << 8,
+            EpsilonCond::StartOfStringOnly => 1 << 8,
+            EpsilonCond::EndOfStringOnlyNonNewline => 1 << 24,
+            EpsilonCond::EndOfStringOnly => 1 << 32,
+            EpsilonCond::PreviousMatchEnd => 1 << 40,
+            EpsilonCond::EndOfString => 1 << 48,
         };
 
         let first = Self::OPCODE_BINARY_REPR.to_le_bytes();
@@ -2120,7 +2120,7 @@ mod tests {
             ),
             (
                 Opcode::Epsilon(InstEpsilon::new(EpsilonCond::EndOfStringOnlyNonNewline)),
-                [8, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0],
+                [8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0],
             ),
         ];
 

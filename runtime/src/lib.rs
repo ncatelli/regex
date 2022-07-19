@@ -472,10 +472,10 @@ impl ToBytecode for Opcode {
             Opcode::ConsumeSet(ics) => ics.to_bytecode(),
             Opcode::Epsilon(ie) => ie.to_bytecode(),
             Opcode::Split(is) => is.to_bytecode(),
-            Opcode::Jmp(_) => todo!(),
-            Opcode::StartSave(_) => todo!(),
-            Opcode::EndSave(_) => todo!(),
-            Opcode::Match => todo!(),
+            Opcode::Jmp(ij) => ij.to_bytecode(),
+            Opcode::StartSave(iss) => iss.to_bytecode(),
+            Opcode::EndSave(ies) => ies.to_bytecode(),
+            Opcode::Match => InstMatch.to_bytecode(),
         }
     }
 }
@@ -703,12 +703,6 @@ impl Display for InstConsumeSet {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct InstSplit {
-    x_branch: InstIndex,
-    y_branch: InstIndex,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EpsilonCond {
     WordBoundary,
@@ -768,6 +762,12 @@ impl Display for InstEpsilon {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct InstSplit {
+    x_branch: InstIndex,
+    y_branch: InstIndex,
+}
+
 impl InstSplit {
     const OPCODE_BINARY_REPR: u64 = 5;
 
@@ -816,6 +816,18 @@ impl InstJmp {
     }
 }
 
+impl ToBytecode for InstJmp {
+    fn to_bytecode(&self) -> OpcodeBytecodeRepr {
+        // pad out the next inst index from 4 to 8 bytes.
+        let padded_next_inst = self.next.as_u32() as u64;
+
+        let first = Self::OPCODE_BINARY_REPR.to_le_bytes();
+        let second = padded_next_inst.to_le_bytes();
+
+        OpcodeBytecodeRepr(merge_arrays(first, second))
+    }
+}
+
 impl Display for InstJmp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "JumpAbs: ({:04})", self.next.as_u32())
@@ -829,9 +841,21 @@ pub struct InstStartSave {
 
 impl InstStartSave {
     const OPCODE_BINARY_REPR: u64 = 7;
+
     #[must_use]
     pub fn new(slot_id: usize) -> Self {
         Self { slot_id }
+    }
+}
+
+impl ToBytecode for InstStartSave {
+    fn to_bytecode(&self) -> OpcodeBytecodeRepr {
+        let slot_id = self.slot_id as u64;
+
+        let first = Self::OPCODE_BINARY_REPR.to_le_bytes();
+        let second = slot_id.to_le_bytes();
+
+        OpcodeBytecodeRepr(merge_arrays(first, second))
     }
 }
 
@@ -848,9 +872,21 @@ pub struct InstEndSave {
 
 impl InstEndSave {
     const OPCODE_BINARY_REPR: u64 = 8;
+
     #[must_use]
     pub fn new(slot_id: usize) -> Self {
         Self { slot_id }
+    }
+}
+
+impl ToBytecode for InstEndSave {
+    fn to_bytecode(&self) -> OpcodeBytecodeRepr {
+        let slot_id = self.slot_id as u64;
+
+        let first = Self::OPCODE_BINARY_REPR.to_le_bytes();
+        let second = slot_id.to_le_bytes();
+
+        OpcodeBytecodeRepr(merge_arrays(first, second))
     }
 }
 
@@ -865,6 +901,15 @@ pub struct InstMatch;
 
 impl InstMatch {
     const OPCODE_BINARY_REPR: u64 = 9;
+}
+
+impl ToBytecode for InstMatch {
+    fn to_bytecode(&self) -> OpcodeBytecodeRepr {
+        let first = Self::OPCODE_BINARY_REPR.to_le_bytes();
+        let second = [0u8; 8];
+
+        OpcodeBytecodeRepr(merge_arrays(first, second))
+    }
 }
 
 impl Display for InstMatch {
@@ -2147,6 +2192,22 @@ mod tests {
             (
                 Opcode::Split(InstSplit::new(InstIndex::from(1), InstIndex::from(256))),
                 [5, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0],
+            ),
+            (
+                Opcode::Jmp(InstJmp::new(InstIndex::from(1))),
+                [6, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+            ),
+            (
+                Opcode::StartSave(InstStartSave::new(1)),
+                [7, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+            ),
+            (
+                Opcode::EndSave(InstEndSave::new(1)),
+                [8, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+            ),
+            (
+                Opcode::Match,
+                [9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
             ),
         ];
 

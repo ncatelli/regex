@@ -518,7 +518,7 @@ pub struct InstConsume {
 }
 
 impl InstConsume {
-    const OPCODE_BINARY_REPR: u64 = 1 << 1;
+    const OPCODE_BINARY_REPR: u64 = 2;
 
     #[must_use]
     pub fn new(value: char) -> Self {
@@ -677,7 +677,7 @@ pub struct InstConsumeSet {
 }
 
 impl InstConsumeSet {
-    const OPCODE_BINARY_REPR: u64 = 1 << 2;
+    const OPCODE_BINARY_REPR: u64 = 3;
 
     pub fn new(idx: usize) -> Self {
         Self::member_of(idx)
@@ -726,7 +726,7 @@ pub struct InstEpsilon {
 }
 
 impl InstEpsilon {
-    const OPCODE_BINARY_REPR: u64 = 1 << 3;
+    const OPCODE_BINARY_REPR: u64 = 4;
 
     pub fn new(cond: EpsilonCond) -> Self {
         Self { cond }
@@ -737,12 +737,12 @@ impl ToBytecode for InstEpsilon {
     fn to_bytecode(&self) -> OpcodeBytecodeRepr {
         let cond_uint_repr: u64 = match self.cond {
             EpsilonCond::WordBoundary => 1,
-            EpsilonCond::NonWordBoundary => 1 << 8,
-            EpsilonCond::StartOfStringOnly => 1 << 8,
-            EpsilonCond::EndOfStringOnlyNonNewline => 1 << 24,
-            EpsilonCond::EndOfStringOnly => 1 << 32,
-            EpsilonCond::PreviousMatchEnd => 1 << 40,
-            EpsilonCond::EndOfString => 1 << 48,
+            EpsilonCond::NonWordBoundary => 2,
+            EpsilonCond::StartOfStringOnly => 3,
+            EpsilonCond::EndOfStringOnlyNonNewline => 4,
+            EpsilonCond::EndOfStringOnly => 5,
+            EpsilonCond::PreviousMatchEnd => 6,
+            EpsilonCond::EndOfString => 7,
         };
 
         let first = Self::OPCODE_BINARY_REPR.to_le_bytes();
@@ -769,6 +769,7 @@ impl Display for InstEpsilon {
 }
 
 impl InstSplit {
+    const OPCODE_BINARY_REPR: u64 = 5;
     #[must_use]
     pub fn new(x: InstIndex, y: InstIndex) -> Self {
         Self {
@@ -795,6 +796,8 @@ pub struct InstJmp {
 }
 
 impl InstJmp {
+    const OPCODE_BINARY_REPR: u64 = 6;
+
     pub fn new(next: InstIndex) -> Self {
         Self { next }
     }
@@ -812,6 +815,7 @@ pub struct InstStartSave {
 }
 
 impl InstStartSave {
+    const OPCODE_BINARY_REPR: u64 = 7;
     #[must_use]
     pub fn new(slot_id: usize) -> Self {
         Self { slot_id }
@@ -830,6 +834,7 @@ pub struct InstEndSave {
 }
 
 impl InstEndSave {
+    const OPCODE_BINARY_REPR: u64 = 8;
     #[must_use]
     pub fn new(slot_id: usize) -> Self {
         Self { slot_id }
@@ -844,6 +849,10 @@ impl Display for InstEndSave {
 
 #[derive(Debug, PartialEq)]
 pub struct InstMatch;
+
+impl InstMatch {
+    const OPCODE_BINARY_REPR: u64 = 9;
+}
 
 impl Display for InstMatch {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -2116,11 +2125,11 @@ mod tests {
             ),
             (
                 Opcode::ConsumeSet(InstConsumeSet::new(2)),
-                [4, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0],
+                [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0],
             ),
             (
                 Opcode::Epsilon(InstEpsilon::new(EpsilonCond::EndOfStringOnlyNonNewline)),
-                [8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0],
+                [4, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0],
             ),
         ];
 

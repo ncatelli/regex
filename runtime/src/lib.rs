@@ -158,6 +158,10 @@ pub struct Instructions {
 }
 
 impl Instructions {
+    const MAGIC_NUMBER: u32 = 0xF0F0;
+}
+
+impl Instructions {
     #[must_use]
     pub fn new(sets: Vec<CharacterSet>, program: Vec<Opcode>) -> Self {
         Self {
@@ -364,6 +368,14 @@ impl From<(usize, Opcode)> for Instruction {
     }
 }
 
+impl ToBytecode for Instruction {
+    type Output = OpcodeBytecodeRepr;
+
+    fn to_bytecode(&self) -> Self::Output {
+        self.opcode.to_bytecode()
+    }
+}
+
 impl Display for Instruction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:04}: {}", self.id, self.opcode)
@@ -387,7 +399,10 @@ fn merge_arrays<const N: usize, const M: usize>(first: [u8; N], second: [u8; N])
 /// Represents a conversion trait to a given opcode's binary little-endian
 /// representation.
 pub trait ToBytecode {
-    fn to_bytecode(&self) -> OpcodeBytecodeRepr;
+    // the bytecode representable type.
+    type Output;
+
+    fn to_bytecode(&self) -> Self::Output;
 }
 
 /// Represents a conversion trait from an opcode's binary little-endian
@@ -465,7 +480,9 @@ impl Display for Opcode {
 }
 
 impl ToBytecode for Opcode {
-    fn to_bytecode(&self) -> OpcodeBytecodeRepr {
+    type Output = OpcodeBytecodeRepr;
+
+    fn to_bytecode(&self) -> Self::Output {
         match self {
             Opcode::Any => InstAny.to_bytecode(),
             Opcode::Consume(ic) => ic.to_bytecode(),
@@ -504,7 +521,9 @@ impl Display for InstAny {
 }
 
 impl ToBytecode for InstAny {
-    fn to_bytecode(&self) -> OpcodeBytecodeRepr {
+    type Output = OpcodeBytecodeRepr;
+
+    fn to_bytecode(&self) -> Self::Output {
         let first = Self::OPCODE_BINARY_REPR.to_le_bytes();
         let second = 0u64.to_le_bytes();
 
@@ -527,7 +546,9 @@ impl InstConsume {
 }
 
 impl ToBytecode for InstConsume {
-    fn to_bytecode(&self) -> OpcodeBytecodeRepr {
+    type Output = OpcodeBytecodeRepr;
+
+    fn to_bytecode(&self) -> Self::Output {
         let char_repr = self.value as u64;
 
         let first = Self::OPCODE_BINARY_REPR.to_le_bytes();
@@ -689,7 +710,9 @@ impl InstConsumeSet {
 }
 
 impl ToBytecode for InstConsumeSet {
-    fn to_bytecode(&self) -> OpcodeBytecodeRepr {
+    type Output = OpcodeBytecodeRepr;
+
+    fn to_bytecode(&self) -> Self::Output {
         let first = Self::OPCODE_BINARY_REPR.to_le_bytes();
         let second = (self.idx as u64).to_le_bytes();
 
@@ -728,7 +751,9 @@ impl InstEpsilon {
 }
 
 impl ToBytecode for InstEpsilon {
-    fn to_bytecode(&self) -> OpcodeBytecodeRepr {
+    type Output = OpcodeBytecodeRepr;
+
+    fn to_bytecode(&self) -> Self::Output {
         let cond_uint_repr: u64 = match self.cond {
             EpsilonCond::WordBoundary => 1,
             EpsilonCond::NonWordBoundary => 2,
@@ -781,7 +806,9 @@ impl InstSplit {
 }
 
 impl ToBytecode for InstSplit {
-    fn to_bytecode(&self) -> OpcodeBytecodeRepr {
+    type Output = OpcodeBytecodeRepr;
+
+    fn to_bytecode(&self) -> Self::Output {
         let x_bytes = self.x_branch.as_u32().to_le_bytes();
         let y_bytes = self.y_branch.as_u32().to_le_bytes();
 
@@ -817,7 +844,9 @@ impl InstJmp {
 }
 
 impl ToBytecode for InstJmp {
-    fn to_bytecode(&self) -> OpcodeBytecodeRepr {
+    type Output = OpcodeBytecodeRepr;
+
+    fn to_bytecode(&self) -> Self::Output {
         // pad out the next inst index from 4 to 8 bytes.
         let padded_next_inst = self.next.as_u32() as u64;
 
@@ -849,7 +878,9 @@ impl InstStartSave {
 }
 
 impl ToBytecode for InstStartSave {
-    fn to_bytecode(&self) -> OpcodeBytecodeRepr {
+    type Output = OpcodeBytecodeRepr;
+
+    fn to_bytecode(&self) -> Self::Output {
         let slot_id = self.slot_id as u64;
 
         let first = Self::OPCODE_BINARY_REPR.to_le_bytes();
@@ -880,7 +911,9 @@ impl InstEndSave {
 }
 
 impl ToBytecode for InstEndSave {
-    fn to_bytecode(&self) -> OpcodeBytecodeRepr {
+    type Output = OpcodeBytecodeRepr;
+
+    fn to_bytecode(&self) -> Self::Output {
         let slot_id = self.slot_id as u64;
 
         let first = Self::OPCODE_BINARY_REPR.to_le_bytes();
@@ -904,7 +937,9 @@ impl InstMatch {
 }
 
 impl ToBytecode for InstMatch {
-    fn to_bytecode(&self) -> OpcodeBytecodeRepr {
+    type Output = OpcodeBytecodeRepr;
+
+    fn to_bytecode(&self) -> Self::Output {
         let first = Self::OPCODE_BINARY_REPR.to_le_bytes();
         let second = [0u8; 8];
 

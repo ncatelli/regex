@@ -1,6 +1,24 @@
 use collections_ext::set::sparse::SparseSet;
 use std::fmt::{Debug, Display};
 
+/// Represents a conversion trait to a given opcode's binary little-endian
+/// representation.
+pub trait ToBytecode {
+    // the bytecode representable type.
+    type Output;
+
+    fn to_bytecode(&self) -> Self::Output;
+}
+
+/// Represents a conversion trait from an opcode's binary little-endian
+/// representation to its internal representation.
+pub trait FromBytecode {
+    type Error;
+    type Output;
+
+    fn from_bytecode(obr: OpcodeBytecodeRepr) -> Result<Self::Output, Self::Error>;
+}
+
 /// Represents a defined match group for a pattern.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SaveGroupSlot {
@@ -240,6 +258,15 @@ impl Instructions {
     }
 }
 
+impl ToBytecode for Instructions {
+    type Output = Vec<u8>;
+
+    fn to_bytecode(&self) -> Self::Output {
+        let _magic_number_bytes = Self::MAGIC_NUMBER.to_le_bytes();
+        todo!()
+    }
+}
+
 impl Display for Instructions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for inst in self.program.iter() {
@@ -394,24 +421,6 @@ fn merge_arrays<const N: usize, const M: usize>(first: [u8; N], second: [u8; N])
     }
 
     output_arr
-}
-
-/// Represents a conversion trait to a given opcode's binary little-endian
-/// representation.
-pub trait ToBytecode {
-    // the bytecode representable type.
-    type Output;
-
-    fn to_bytecode(&self) -> Self::Output;
-}
-
-/// Represents a conversion trait from an opcode's binary little-endian
-/// representation to its internal representation.
-pub trait FromBytecode {
-    type Error;
-    type Output;
-
-    fn from_bytecode(obr: OpcodeBytecodeRepr) -> Result<Self::Output, Self::Error>;
 }
 
 /// A wrapper type for the binary representation of an opcode in little-endian

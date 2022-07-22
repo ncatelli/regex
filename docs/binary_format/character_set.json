@@ -5,11 +5,15 @@
 	},
 	{
 		"name": "set variant",
-		"bits": 8
+		"bits": 2
+	},
+	{
+		"attr": "exclusive",
+		"bits": 1
 	},
 	{
 		"attr": "unused",
-		"bits": 8
+		"bits": 13
 	},
 	{
 		"name": "element count",

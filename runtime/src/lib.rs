@@ -1,15 +1,6 @@
 use collections_ext::set::sparse::SparseSet;
 use std::fmt::{Debug, Display};
 
-/// Represents a conversion trait to a given opcode's binary little-endian
-/// representation.
-pub trait ToBytecode {
-    // the bytecode representable type.
-    type Output;
-
-    fn to_bytecode(&self) -> Self::Output;
-}
-
 /// Represents a conversion trait from an opcode's binary little-endian
 /// representation to its internal representation.
 pub trait FromBytecode {
@@ -176,7 +167,7 @@ pub struct Instructions {
 }
 
 impl Instructions {
-    const MAGIC_NUMBER: u32 = 0xF0F0;
+    pub const MAGIC_NUMBER: u16 = 0xF0F0;
 }
 
 impl Instructions {
@@ -258,15 +249,6 @@ impl Instructions {
     }
 }
 
-impl ToBytecode for Instructions {
-    type Output = Vec<u8>;
-
-    fn to_bytecode(&self) -> Self::Output {
-        let _magic_number_bytes = Self::MAGIC_NUMBER.to_le_bytes();
-        todo!()
-    }
-}
-
 impl Display for Instructions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for inst in self.program.iter() {
@@ -311,12 +293,12 @@ pub struct InstIndex(u32);
 
 impl InstIndex {
     #[inline]
-    fn as_u32(self) -> u32 {
+    pub fn as_u32(self) -> u32 {
         self.0
     }
 
     #[inline]
-    fn as_usize(self) -> usize {
+    pub fn as_usize(self) -> usize {
         self.0 as usize
     }
 }
@@ -395,38 +377,16 @@ impl From<(usize, Opcode)> for Instruction {
     }
 }
 
-impl ToBytecode for Instruction {
-    type Output = OpcodeBytecodeRepr;
-
-    fn to_bytecode(&self) -> Self::Output {
-        self.opcode.to_bytecode()
-    }
-}
-
 impl Display for Instruction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:04}: {}", self.id, self.opcode)
     }
 }
 
-/// Merges two arrays.
-///
-/// # Safety
-/// Caller guarantees that the `N` parameter is EXACTLY half of `M` parameter.
-fn merge_arrays<const N: usize, const M: usize>(first: [u8; N], second: [u8; N]) -> [u8; M] {
-    let mut output_arr = [0; M];
-
-    for (idx, val) in first.into_iter().chain(second.into_iter()).enumerate() {
-        output_arr[idx] = val;
-    }
-
-    output_arr
-}
-
 /// A wrapper type for the binary representation of an opcode in little-endian
 /// format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct OpcodeBytecodeRepr([u8; 16]);
+pub struct OpcodeBytecodeRepr(pub [u8; 16]);
 
 /// Represents all possible operations for the runtime vm.
 #[derive(Debug, Clone, PartialEq)]
@@ -488,29 +448,11 @@ impl Display for Opcode {
     }
 }
 
-impl ToBytecode for Opcode {
-    type Output = OpcodeBytecodeRepr;
-
-    fn to_bytecode(&self) -> Self::Output {
-        match self {
-            Opcode::Any => InstAny.to_bytecode(),
-            Opcode::Consume(ic) => ic.to_bytecode(),
-            Opcode::ConsumeSet(ics) => ics.to_bytecode(),
-            Opcode::Epsilon(ie) => ie.to_bytecode(),
-            Opcode::Split(is) => is.to_bytecode(),
-            Opcode::Jmp(ij) => ij.to_bytecode(),
-            Opcode::StartSave(iss) => iss.to_bytecode(),
-            Opcode::EndSave(ies) => ies.to_bytecode(),
-            Opcode::Match => InstMatch.to_bytecode(),
-        }
-    }
-}
-
 #[derive(Debug, PartialEq)]
 pub struct InstAny;
 
 impl InstAny {
-    const OPCODE_BINARY_REPR: u64 = 1;
+    pub const OPCODE_BINARY_REPR: u64 = 1;
 
     pub const fn new() -> Self {
         Self
@@ -529,41 +471,17 @@ impl Display for InstAny {
     }
 }
 
-impl ToBytecode for InstAny {
-    type Output = OpcodeBytecodeRepr;
-
-    fn to_bytecode(&self) -> Self::Output {
-        let first = Self::OPCODE_BINARY_REPR.to_le_bytes();
-        let second = 0u64.to_le_bytes();
-
-        OpcodeBytecodeRepr(merge_arrays(first, second))
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstConsume {
     pub value: char,
 }
 
 impl InstConsume {
-    const OPCODE_BINARY_REPR: u64 = 2;
+    pub const OPCODE_BINARY_REPR: u64 = 2;
 
     #[must_use]
     pub fn new(value: char) -> Self {
         Self { value }
-    }
-}
-
-impl ToBytecode for InstConsume {
-    type Output = OpcodeBytecodeRepr;
-
-    fn to_bytecode(&self) -> Self::Output {
-        let char_repr = self.value as u64;
-
-        let first = Self::OPCODE_BINARY_REPR.to_le_bytes();
-        let second = char_repr.to_le_bytes();
-
-        OpcodeBytecodeRepr(merge_arrays(first, second))
     }
 }
 
@@ -607,8 +525,8 @@ pub trait CharacterSetRepresentable: Into<CharacterSet> {}
 /// membership to a character alphabet.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CharacterSet {
-    membership: SetMembership,
-    set: CharacterAlphabet,
+    pub membership: SetMembership,
+    pub set: CharacterAlphabet,
 }
 
 impl CharacterSet {
@@ -646,6 +564,10 @@ impl CharacterRangeSetVerifiable for CharacterSet {
             SetMembership::Exclusive => self.set.not_in_set(value),
         }
     }
+}
+
+impl CharacterSet {
+    pub const MAGIC_NUMBER: u16 = 0x1A1A;
 }
 
 /// Represents a runtime dispatchable set of characters.
@@ -707,7 +629,7 @@ pub struct InstConsumeSet {
 }
 
 impl InstConsumeSet {
-    const OPCODE_BINARY_REPR: u64 = 3;
+    pub const OPCODE_BINARY_REPR: u64 = 3;
 
     pub fn new(idx: usize) -> Self {
         Self::member_of(idx)
@@ -715,17 +637,6 @@ impl InstConsumeSet {
 
     pub fn member_of(idx: usize) -> Self {
         Self { idx }
-    }
-}
-
-impl ToBytecode for InstConsumeSet {
-    type Output = OpcodeBytecodeRepr;
-
-    fn to_bytecode(&self) -> Self::Output {
-        let first = Self::OPCODE_BINARY_REPR.to_le_bytes();
-        let second = (self.idx as u64).to_le_bytes();
-
-        OpcodeBytecodeRepr(merge_arrays(first, second))
     }
 }
 
@@ -752,31 +663,10 @@ pub struct InstEpsilon {
 }
 
 impl InstEpsilon {
-    const OPCODE_BINARY_REPR: u64 = 4;
+    pub const OPCODE_BINARY_REPR: u64 = 4;
 
     pub fn new(cond: EpsilonCond) -> Self {
         Self { cond }
-    }
-}
-
-impl ToBytecode for InstEpsilon {
-    type Output = OpcodeBytecodeRepr;
-
-    fn to_bytecode(&self) -> Self::Output {
-        let cond_uint_repr: u64 = match self.cond {
-            EpsilonCond::WordBoundary => 1,
-            EpsilonCond::NonWordBoundary => 2,
-            EpsilonCond::StartOfStringOnly => 3,
-            EpsilonCond::EndOfStringOnlyNonNewline => 4,
-            EpsilonCond::EndOfStringOnly => 5,
-            EpsilonCond::PreviousMatchEnd => 6,
-            EpsilonCond::EndOfString => 7,
-        };
-
-        let first = Self::OPCODE_BINARY_REPR.to_le_bytes();
-        let second = cond_uint_repr.to_le_bytes();
-
-        OpcodeBytecodeRepr(merge_arrays(first, second))
     }
 }
 
@@ -798,12 +688,12 @@ impl Display for InstEpsilon {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstSplit {
-    x_branch: InstIndex,
-    y_branch: InstIndex,
+    pub x_branch: InstIndex,
+    pub y_branch: InstIndex,
 }
 
 impl InstSplit {
-    const OPCODE_BINARY_REPR: u64 = 5;
+    pub const OPCODE_BINARY_REPR: u64 = 5;
 
     #[must_use]
     pub fn new(x: InstIndex, y: InstIndex) -> Self {
@@ -811,20 +701,6 @@ impl InstSplit {
             x_branch: x,
             y_branch: y,
         }
-    }
-}
-
-impl ToBytecode for InstSplit {
-    type Output = OpcodeBytecodeRepr;
-
-    fn to_bytecode(&self) -> Self::Output {
-        let x_bytes = self.x_branch.as_u32().to_le_bytes();
-        let y_bytes = self.y_branch.as_u32().to_le_bytes();
-
-        let first = Self::OPCODE_BINARY_REPR.to_le_bytes();
-        let second = merge_arrays(x_bytes, y_bytes);
-
-        OpcodeBytecodeRepr(merge_arrays(first, second))
     }
 }
 
@@ -841,28 +717,14 @@ impl Display for InstSplit {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstJmp {
-    next: InstIndex,
+    pub next: InstIndex,
 }
 
 impl InstJmp {
-    const OPCODE_BINARY_REPR: u64 = 6;
+    pub const OPCODE_BINARY_REPR: u64 = 6;
 
     pub fn new(next: InstIndex) -> Self {
         Self { next }
-    }
-}
-
-impl ToBytecode for InstJmp {
-    type Output = OpcodeBytecodeRepr;
-
-    fn to_bytecode(&self) -> Self::Output {
-        // pad out the next inst index from 4 to 8 bytes.
-        let padded_next_inst = self.next.as_u32() as u64;
-
-        let first = Self::OPCODE_BINARY_REPR.to_le_bytes();
-        let second = padded_next_inst.to_le_bytes();
-
-        OpcodeBytecodeRepr(merge_arrays(first, second))
     }
 }
 
@@ -874,28 +736,15 @@ impl Display for InstJmp {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstStartSave {
-    slot_id: usize,
+    pub slot_id: usize,
 }
 
 impl InstStartSave {
-    const OPCODE_BINARY_REPR: u64 = 7;
+    pub const OPCODE_BINARY_REPR: u64 = 7;
 
     #[must_use]
     pub fn new(slot_id: usize) -> Self {
         Self { slot_id }
-    }
-}
-
-impl ToBytecode for InstStartSave {
-    type Output = OpcodeBytecodeRepr;
-
-    fn to_bytecode(&self) -> Self::Output {
-        let slot_id = self.slot_id as u64;
-
-        let first = Self::OPCODE_BINARY_REPR.to_le_bytes();
-        let second = slot_id.to_le_bytes();
-
-        OpcodeBytecodeRepr(merge_arrays(first, second))
     }
 }
 
@@ -907,28 +756,15 @@ impl Display for InstStartSave {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstEndSave {
-    slot_id: usize,
+    pub slot_id: usize,
 }
 
 impl InstEndSave {
-    const OPCODE_BINARY_REPR: u64 = 8;
+    pub const OPCODE_BINARY_REPR: u64 = 8;
 
     #[must_use]
     pub fn new(slot_id: usize) -> Self {
         Self { slot_id }
-    }
-}
-
-impl ToBytecode for InstEndSave {
-    type Output = OpcodeBytecodeRepr;
-
-    fn to_bytecode(&self) -> Self::Output {
-        let slot_id = self.slot_id as u64;
-
-        let first = Self::OPCODE_BINARY_REPR.to_le_bytes();
-        let second = slot_id.to_le_bytes();
-
-        OpcodeBytecodeRepr(merge_arrays(first, second))
     }
 }
 
@@ -942,18 +778,7 @@ impl Display for InstEndSave {
 pub struct InstMatch;
 
 impl InstMatch {
-    const OPCODE_BINARY_REPR: u64 = 9;
-}
-
-impl ToBytecode for InstMatch {
-    type Output = OpcodeBytecodeRepr;
-
-    fn to_bytecode(&self) -> Self::Output {
-        let first = Self::OPCODE_BINARY_REPR.to_le_bytes();
-        let second = [0u8; 8];
-
-        OpcodeBytecodeRepr(merge_arrays(first, second))
-    }
+    pub const OPCODE_BINARY_REPR: u64 = 9;
 }
 
 impl Display for InstMatch {
@@ -2210,59 +2035,5 @@ mod tests {
         use core::mem::size_of;
 
         assert_eq!(16, size_of::<Opcode>())
-    }
-
-    #[test]
-    fn should_encode_instruction_into_expected_bytecode_representation() {
-        use super::ToBytecode;
-
-        let input_output = [
-            (
-                Opcode::Any,
-                [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            ),
-            (
-                Opcode::Consume(InstConsume::new('a')),
-                [2, 0, 0, 0, 0, 0, 0, 0, 97, 0, 0, 0, 0, 0, 0, 0],
-            ),
-            (
-                Opcode::ConsumeSet(InstConsumeSet::new(2)),
-                [3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0],
-            ),
-            (
-                Opcode::Epsilon(InstEpsilon::new(EpsilonCond::EndOfStringOnlyNonNewline)),
-                [4, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0],
-            ),
-            (
-                Opcode::Split(InstSplit::new(InstIndex::from(1), InstIndex::from(256))),
-                [5, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0],
-            ),
-            (
-                Opcode::Jmp(InstJmp::new(InstIndex::from(1))),
-                [6, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
-            ),
-            (
-                Opcode::StartSave(InstStartSave::new(1)),
-                [7, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
-            ),
-            (
-                Opcode::EndSave(InstEndSave::new(1)),
-                [8, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
-            ),
-            (
-                Opcode::Match,
-                [9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            ),
-        ];
-
-        for (test_case, (opcode, expected_output)) in input_output.into_iter().enumerate() {
-            let generated_bytecode = opcode.to_bytecode();
-            let expected_bytecode = OpcodeBytecodeRepr(expected_output);
-
-            assert_eq!(
-                (test_case, expected_bytecode),
-                (test_case, generated_bytecode)
-            );
-        }
     }
 }

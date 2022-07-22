@@ -1,0 +1,18 @@
+[
+	{
+		"name": 6682,
+		"bits": 16
+	},
+	{
+		"name": "set variant",
+		"bits": 8
+	},
+	{
+		"attr": "unused",
+		"bits": 8
+	},
+	{
+		"name": "element count",
+		"bits": 32
+	}
+]

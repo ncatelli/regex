@@ -4,15 +4,32 @@
 		"bits": 16
 	},
 	{
+		"attr": "fast-forward variant",
+		"bits": 2,
+		"name": " "
+	},
+	{
 		"attr": "unused",
-		"bits": 48
+		"bits": 14
 	},
 	{
 		"name": "set count",
 		"bits": 32
 	},
 	{
-		"name": "instruction count",
+		"name": "inst count",
 		"bits": 32
+	},
+	{
+		"name": "inst offset",
+		"bits": 32
+	},
+	{
+		"name": "fast-forward set id or value",
+		"bits": 32
+	},
+	{
+		"attr": "unused",
+		"bits": 96
 	}
 ]

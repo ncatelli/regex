@@ -3,6 +3,11 @@
 ## General
 This document contains information about he binary format of the bytecode regex vm.
 
+## Header
+
+![header](./header.svg)
+
+
 ## Instructions
 Instructions follow the general format of
 

@@ -5,6 +5,7 @@ This document contains information about he binary format of the bytecode regex 
 
 ## Instructions
 Instructions follow the general format of
+
 ![opcode](./opcode.svg)
 
 ### Any

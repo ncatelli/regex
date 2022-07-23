@@ -149,7 +149,8 @@ impl<const SG: usize> Default for Threads<SG> {
 #[derive(Debug, PartialEq)]
 pub enum FastForward {
     Char(char),
-    Set(CharacterSet),
+    // The index of the first consuming set.
+    Set(usize),
     None,
 }
 
@@ -1154,7 +1155,10 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
             |(_, window)| match (window.current(), &program.fast_forward) {
                 (None, _) | (_, FastForward::None) => false,
                 (Some(c), FastForward::Char(first_match)) => c != *first_match,
-                (Some(c), FastForward::Set(first_match)) => first_match.not_in_set(c),
+                (Some(c), FastForward::Set(first_match)) => {
+                    let first_consuming_set = &program.sets[*first_match];
+                    first_consuming_set.not_in_set(c)
+                }
             },
         );
 

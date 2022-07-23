@@ -1,3 +1,39 @@
+//! Provides a runtime evaluator for a compiled regex bytecode.
+//!
+//! # Example
+//!
+//! ```
+//! use regex_runtime::*;
+//!
+//! let progs = vec![
+//!     (
+//!         Some([SaveGroupSlot::complete(0, 1)]),
+//!         Instructions::default().with_opcodes(vec![
+//!             Opcode::StartSave(InstStartSave::new(0)),
+//!             Opcode::Consume(InstConsume::new('a')),
+//!             Opcode::EndSave(InstEndSave::new(0)),
+//!             Opcode::Match,
+//!         ]),
+//!     ),
+//!     (
+//!         None,
+//!         Instructions::default().with_opcodes(vec![
+//!             Opcode::StartSave(InstStartSave::new(0)),
+//!             Opcode::Consume(InstConsume::new('b')),
+//!             Opcode::EndSave(InstEndSave::new(0)),
+//!             Opcode::Match,
+//!         ]),
+//!     ),
+//! ];
+//!
+//! let input = "aab";
+//!
+//! for (expected_res, prog) in progs {
+//!     let res = run::<1>(&prog, input);
+//!     assert_eq!(expected_res, res)
+//! }
+//! ```
+
 use collections_ext::set::sparse::SparseSet;
 use std::fmt::{Debug, Display};
 
@@ -42,7 +78,6 @@ impl From<SaveGroup> for SaveGroupSlot {
     fn from(src: SaveGroup) -> Self {
         match src {
             SaveGroup::None => SaveGroupSlot::None,
-
             SaveGroup::Allocated { .. } => SaveGroupSlot::None,
             SaveGroup::Open { .. } => SaveGroupSlot::None,
             SaveGroup::Complete { start, end, .. } => SaveGroupSlot::Complete { start, end },
@@ -56,7 +91,7 @@ impl Default for SaveGroupSlot {
     }
 }
 
-/// Represents a Save Group as tracked on an open thread
+/// Represents a Save Group as tracked on an open thread.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SaveGroup {
     /// No available slot has been encountered.
@@ -146,11 +181,15 @@ impl<const SG: usize> Default for Threads<SG> {
     }
 }
 
+/// Representative the first consuming match that the runtime can fast-forward
+/// to in an input.
 #[derive(Debug, PartialEq)]
 pub enum FastForward {
+    /// Represents a single character.
     Char(char),
     // The index of the first consuming set.
     Set(usize),
+    /// Represents that no fast-forward should be performed.
     None,
 }
 
@@ -160,6 +199,9 @@ impl Default for FastForward {
     }
 }
 
+/// Represents a runtime program, consisting of all character sets referenced
+/// in an evaluation, all instructions in the program and whether the runtime
+/// can fast-forward through an input.
 #[derive(Default, Debug, PartialEq)]
 pub struct Instructions {
     pub sets: Vec<CharacterSet>,
@@ -172,6 +214,9 @@ impl Instructions {
 }
 
 impl Instructions {
+    /// Instantiates a program from a predefined list of operations and
+    /// character sets. By default fast_forward is disabled.
+
     #[must_use]
     pub fn new(sets: Vec<CharacterSet>, program: Vec<Opcode>) -> Self {
         Self {
@@ -185,6 +230,8 @@ impl Instructions {
         }
     }
 
+    /// Modifies a program, assigning a new set of opcodes to a program after
+    /// up-converting it to a list of instructions.
     pub fn with_opcodes(self, program: Vec<Opcode>) -> Self {
         Self {
             sets: self.sets,
@@ -197,6 +244,7 @@ impl Instructions {
         }
     }
 
+    /// Modifies a program, assigning a new list of instructions.
     pub fn with_instructions(self, program: Vec<Instruction>) -> Self {
         Self {
             sets: self.sets,
@@ -205,6 +253,7 @@ impl Instructions {
         }
     }
 
+    /// Modifies a program, assigning a new list of character sets.
     pub fn with_sets(self, sets: Vec<CharacterSet>) -> Self {
         Self {
             sets,
@@ -213,6 +262,7 @@ impl Instructions {
         }
     }
 
+    /// Modifies a program, assigning a new fast-forward setting.
     pub fn with_fast_forward(self, fast_forward: FastForward) -> Self {
         Self {
             sets: self.sets,
@@ -253,7 +303,7 @@ impl Instructions {
 impl Display for Instructions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for inst in self.program.iter() {
-            writeln!(f, "{:04}: {}", inst.id, inst.opcode)?
+            writeln!(f, "{:04}: {}", inst.offset, inst.opcode)?
         }
 
         Ok(())
@@ -288,6 +338,7 @@ impl From<Instructions> for (FastForward, Vec<CharacterSet>, Vec<Instruction>) {
     }
 }
 
+/// A wrapper-type providing a program counter into the runtime program.
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InstIndex(u32);
@@ -330,17 +381,19 @@ impl std::ops::Add<Self> for InstIndex {
     }
 }
 
+/// A runtime instruction, containing an offset and a corresponding instruction.
 #[derive(Debug, PartialEq)]
 pub struct Instruction {
     // A unique identifier for a given instruction
-    pub id: usize,
+    pub offset: usize,
     pub opcode: Opcode,
 }
 
 impl Instruction {
+    /// Instantiates a new instruction from its constituent parts.
     #[must_use]
-    pub fn new(id: usize, opcode: Opcode) -> Self {
-        Self { id, opcode }
+    pub fn new(offset: usize, opcode: Opcode) -> Self {
+        Self { offset, opcode }
     }
 
     /// Returns the Instruction's enclosed Opcode.
@@ -368,7 +421,7 @@ impl AsRef<Opcode> for Instruction {
 
 impl From<Instruction> for (usize, Opcode) {
     fn from(inst: Instruction) -> Self {
-        (inst.id, inst.opcode)
+        (inst.offset, inst.opcode)
     }
 }
 
@@ -380,7 +433,7 @@ impl From<(usize, Opcode)> for Instruction {
 
 impl Display for Instruction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:04}: {}", self.id, self.opcode)
+        write!(f, "{:04}: {}", self.offset, self.opcode)
     }
 }
 
@@ -390,16 +443,32 @@ impl Display for Instruction {
 pub struct OpcodeBytecodeRepr(pub [u8; 16]);
 
 /// Represents all possible operations for the runtime vm.
+/// An enum representation of the runtime's operation set.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Opcode {
+    /// A consume operation, matching any character.
     Any,
+    /// A consume operation, matching an explicit character.
     Consume(InstConsume),
+    /// A consume operation, matching a character if it falls within the
+    /// bounds of a predefined set.
     ConsumeSet(InstConsumeSet),
+    /// A non-consuming epsilon transition. Examples of which are
+    /// lookahead/lookback operation.
     Epsilon(InstEpsilon),
+    /// A non-consuming branch operation. This forks off two threads at the
+    /// enclosed offsets.
     Split(InstSplit),
+    /// A non-consuming jump operation. This instruction modifies the program
+    /// counter in place for the current evaluating thread.
     Jmp(InstJmp),
+    /// A non-consuming operation that signifies the start of an enclosed save
+    /// group.
     StartSave(InstStartSave),
+    /// A non-consuming operation that signifies the end of an enclosed save
+    /// group.
     EndSave(InstEndSave),
+    /// A non-consuming operation that signifies a match.
     Match,
 }
 
@@ -449,12 +518,14 @@ impl Display for Opcode {
     }
 }
 
+/// A concrete representation of the Any Opcode.
 #[derive(Debug, PartialEq)]
 pub struct InstAny;
 
 impl InstAny {
     pub const OPCODE_BINARY_REPR: u64 = 1;
 
+    /// Instantiates a new `InstAny`.
     pub const fn new() -> Self {
         Self
     }
@@ -472,14 +543,17 @@ impl Display for InstAny {
     }
 }
 
+/// A concrete representation of the Consume Opcode.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstConsume {
+    /// An expected unicode character required to match.
     pub value: char,
 }
 
 impl InstConsume {
     pub const OPCODE_BINARY_REPR: u64 = 2;
 
+    /// Instantiates a new `InstConsume` with the expected matching char.
     #[must_use]
     pub fn new(value: char) -> Self {
         Self { value }
@@ -531,6 +605,7 @@ pub struct CharacterSet {
 }
 
 impl CharacterSet {
+    /// Instantiates an inclusive character set from a passed alphabet.
     pub fn inclusive(set: CharacterAlphabet) -> Self {
         Self {
             membership: SetMembership::Inclusive,
@@ -538,6 +613,7 @@ impl CharacterSet {
         }
     }
 
+    /// Instantiates an exclusive character set from a passed alphabet.
     pub fn exclusive(set: CharacterAlphabet) -> Self {
         Self {
             membership: SetMembership::Exclusive,
@@ -545,6 +621,7 @@ impl CharacterSet {
         }
     }
 
+    /// Inverts a character sets membership, retaining its defined alphabet.
     pub fn invert_membership(self) -> Self {
         let Self { membership, set } = self;
 
@@ -580,6 +657,8 @@ pub enum CharacterAlphabet {
     Explicit(Vec<char>),
     /// Represents a set of range of values i.e. `[0-9a-zA-Z]`,  etc...
     Ranges(Vec<std::ops::RangeInclusive<char>>),
+    /// Represents a unicode category.
+    UnicodeCategory(UnicodeCategory),
 }
 
 impl CharacterAlphabet {
@@ -593,6 +672,7 @@ impl CharacterAlphabet {
                 CharacterAlphabet::Explicit(explicit_chars) => {
                     explicit_chars.into_iter().map(|c| c..=c).collect()
                 }
+                CharacterAlphabet::UnicodeCategory(_) => todo!(),
             })
             .collect();
 
@@ -606,6 +686,141 @@ impl CharacterRangeSetVerifiable for CharacterAlphabet {
             CharacterAlphabet::Range(r) => r.in_set(value),
             CharacterAlphabet::Explicit(v) => v.in_set(value),
             CharacterAlphabet::Ranges(ranges) => ranges.in_set(value),
+            CharacterAlphabet::UnicodeCategory(category) => category.in_set(value),
+        }
+    }
+}
+
+/// Represents a unicode general category.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnicodeCategory {
+    Letter,
+    LowercaseLetter,
+    UppercaseLetter,
+    TitlecaseLetter,
+    CasedLetter,
+    ModifiedLetter,
+    OtherLetter,
+    Mark,
+    NonSpacingMark,
+    SpacingCombiningMark,
+    EnclosingMark,
+    Separator,
+    SpaceSeparator,
+    LineSeparator,
+    ParagraphSeparator,
+    Symbol,
+    MathSymbol,
+    CurrencySymbol,
+    ModifierSymbol,
+    OtherSymbol,
+    Number,
+    DecimalDigitNumber,
+    LetterNumber,
+    OtherNumber,
+    Punctuation,
+    DashPunctuation,
+    OpenPunctuation,
+    ClosePunctuation,
+    InitialPunctuation,
+    FinalPunctuation,
+    ConnectorPunctuation,
+    OtherPunctuation,
+    Other,
+    Control,
+    Format,
+    PrivateUse,
+    Surrogate,
+    Unassigned,
+}
+
+impl CharacterRangeSetVerifiable for UnicodeCategory {
+    #![allow(clippy::match_like_matches_macro)]
+    fn in_set(&self, value: char) -> bool {
+        use unicode_categories::{HumanReadableCategory, UnicodeCategorizable};
+
+        let char_category =
+            if let Some(hrc) = value.unicode_category().map(HumanReadableCategory::from) {
+                hrc
+            } else {
+                return false;
+            };
+
+        match (self, char_category) {
+            (UnicodeCategory::Letter, HumanReadableCategory::LetterLowercase)
+            | (UnicodeCategory::Letter, HumanReadableCategory::LetterUppercase)
+            | (UnicodeCategory::Letter, HumanReadableCategory::LetterTitlecase)
+            | (UnicodeCategory::Letter, HumanReadableCategory::LetterModifier)
+            | (UnicodeCategory::Letter, HumanReadableCategory::LetterOther)
+            | (UnicodeCategory::LowercaseLetter, HumanReadableCategory::LetterLowercase)
+            | (UnicodeCategory::UppercaseLetter, HumanReadableCategory::LetterUppercase)
+            | (UnicodeCategory::TitlecaseLetter, HumanReadableCategory::LetterTitlecase)
+            | (UnicodeCategory::ModifiedLetter, HumanReadableCategory::LetterModifier)
+            | (UnicodeCategory::OtherLetter, HumanReadableCategory::LetterOther) => true,
+            (UnicodeCategory::CasedLetter, HumanReadableCategory::LetterLowercase)
+            | (UnicodeCategory::CasedLetter, HumanReadableCategory::LetterUppercase)
+            | (UnicodeCategory::CasedLetter, HumanReadableCategory::LetterTitlecase) => true,
+            (UnicodeCategory::Mark, HumanReadableCategory::MarkNonspacing)
+            | (UnicodeCategory::Mark, HumanReadableCategory::MarkSpacingCombining)
+            | (UnicodeCategory::Mark, HumanReadableCategory::MarkEnclosing)
+            | (UnicodeCategory::NonSpacingMark, HumanReadableCategory::MarkNonspacing)
+            | (
+                UnicodeCategory::SpacingCombiningMark,
+                HumanReadableCategory::MarkSpacingCombining,
+            )
+            | (UnicodeCategory::EnclosingMark, HumanReadableCategory::MarkEnclosing) => true,
+            (UnicodeCategory::Number, HumanReadableCategory::NumberDecimalDigit)
+            | (UnicodeCategory::Number, HumanReadableCategory::NumberLetter)
+            | (UnicodeCategory::Number, HumanReadableCategory::NumberOther)
+            | (UnicodeCategory::DecimalDigitNumber, HumanReadableCategory::NumberDecimalDigit)
+            | (UnicodeCategory::LetterNumber, HumanReadableCategory::NumberLetter)
+            | (UnicodeCategory::OtherNumber, HumanReadableCategory::NumberOther) => true,
+            (UnicodeCategory::Separator, HumanReadableCategory::SeperatorSpace)
+            | (UnicodeCategory::Separator, HumanReadableCategory::SeperatorLine)
+            | (UnicodeCategory::Separator, HumanReadableCategory::SeperatorParagraph)
+            | (UnicodeCategory::SpaceSeparator, HumanReadableCategory::SeperatorSpace)
+            | (UnicodeCategory::LineSeparator, HumanReadableCategory::SeperatorLine)
+            | (UnicodeCategory::ParagraphSeparator, HumanReadableCategory::SeperatorParagraph) => {
+                true
+            }
+            (UnicodeCategory::Symbol, HumanReadableCategory::SymbolMath)
+            | (UnicodeCategory::Symbol, HumanReadableCategory::SymbolCurrency)
+            | (UnicodeCategory::Symbol, HumanReadableCategory::SymbolModifier)
+            | (UnicodeCategory::Symbol, HumanReadableCategory::SymbolOther)
+            | (UnicodeCategory::MathSymbol, HumanReadableCategory::SymbolMath)
+            | (UnicodeCategory::CurrencySymbol, HumanReadableCategory::SymbolCurrency)
+            | (UnicodeCategory::ModifierSymbol, HumanReadableCategory::SymbolModifier)
+            | (UnicodeCategory::OtherSymbol, HumanReadableCategory::SymbolOther) => true,
+            (UnicodeCategory::Punctuation, HumanReadableCategory::PunctuationDash)
+            | (UnicodeCategory::Punctuation, HumanReadableCategory::PunctuationOpen)
+            | (UnicodeCategory::Punctuation, HumanReadableCategory::PunctuationClose)
+            | (UnicodeCategory::Punctuation, HumanReadableCategory::PunctuationInnerQuote)
+            | (UnicodeCategory::Punctuation, HumanReadableCategory::PunctuationFinalQuote)
+            | (UnicodeCategory::Punctuation, HumanReadableCategory::PunctuationConnector)
+            | (UnicodeCategory::Punctuation, HumanReadableCategory::PunctuationOther)
+            | (UnicodeCategory::DashPunctuation, HumanReadableCategory::PunctuationDash)
+            | (UnicodeCategory::OpenPunctuation, HumanReadableCategory::PunctuationOpen)
+            | (UnicodeCategory::ClosePunctuation, HumanReadableCategory::PunctuationClose)
+            | (UnicodeCategory::InitialPunctuation, HumanReadableCategory::PunctuationInnerQuote)
+            | (UnicodeCategory::FinalPunctuation, HumanReadableCategory::PunctuationFinalQuote)
+            | (
+                UnicodeCategory::ConnectorPunctuation,
+                HumanReadableCategory::PunctuationConnector,
+            )
+            | (UnicodeCategory::OtherPunctuation, HumanReadableCategory::PunctuationOther) => true,
+            (UnicodeCategory::Other, HumanReadableCategory::OtherControl)
+            | (UnicodeCategory::Other, HumanReadableCategory::OtherFormat)
+            | (UnicodeCategory::Other, HumanReadableCategory::OtherPrivateUse)
+            | (UnicodeCategory::Other, HumanReadableCategory::OtherSurrogate)
+            | (UnicodeCategory::Other, HumanReadableCategory::OtherNotAssigned)
+            | (UnicodeCategory::Control, HumanReadableCategory::OtherControl)
+            | (UnicodeCategory::Format, HumanReadableCategory::OtherFormat)
+            | (UnicodeCategory::PrivateUse, HumanReadableCategory::OtherPrivateUse)
+            | (UnicodeCategory::Surrogate, HumanReadableCategory::OtherSurrogate)
+            | (UnicodeCategory::Unassigned, HumanReadableCategory::OtherNotAssigned) => true,
+
+            // All others do not match
+            _ => false,
         }
     }
 }
@@ -626,16 +841,19 @@ pub enum SetMembership {
 /// characters. This functions as a brevity tool to prevent long alternations.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstConsumeSet {
+    /// A offset id to a predefined set in the current program.
     pub idx: usize,
 }
 
 impl InstConsumeSet {
     pub const OPCODE_BINARY_REPR: u64 = 3;
-
+  
+    /// Instantiate a new `InstConsumeSet` with a passed index.
     pub fn new(idx: usize) -> Self {
         Self::member_of(idx)
     }
 
+    /// An alias method to `new`
     pub fn member_of(idx: usize) -> Self {
         Self { idx }
     }
@@ -646,6 +864,7 @@ impl Display for InstConsumeSet {
         write!(f, "ConsumeSet: {{{:04}}}", self.idx)
     }
 }
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EpsilonCond {
@@ -658,6 +877,7 @@ pub enum EpsilonCond {
     EndOfString,
 }
 
+/// An internal representation of an `Epsilon` opcode.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstEpsilon {
     pub cond: EpsilonCond,
@@ -666,6 +886,7 @@ pub struct InstEpsilon {
 impl InstEpsilon {
     pub const OPCODE_BINARY_REPR: u64 = 4;
 
+    /// Instantiates a new `InstEpsilon` from a passed condition.
     pub fn new(cond: EpsilonCond) -> Self {
         Self { cond }
     }
@@ -686,6 +907,7 @@ impl Display for InstEpsilon {
         write!(f, "Epsilon: {{{}}}", cond)
     }
 }
+
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstSplit {
@@ -716,6 +938,8 @@ impl Display for InstSplit {
     }
 }
 
+
+/// An internal representation of the `Jmp` opcode.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstJmp {
     pub next: InstIndex,
@@ -724,6 +948,7 @@ pub struct InstJmp {
 impl InstJmp {
     pub const OPCODE_BINARY_REPR: u64 = 6;
 
+    /// Instnatiates a new `InstJump` from a past program counter value.
     pub fn new(next: InstIndex) -> Self {
         Self { next }
     }
@@ -735,6 +960,7 @@ impl Display for InstJmp {
     }
 }
 
+/// An internal representation of the `StartSave` opcode.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstStartSave {
     pub slot_id: usize,
@@ -743,6 +969,7 @@ pub struct InstStartSave {
 impl InstStartSave {
     pub const OPCODE_BINARY_REPR: u64 = 7;
 
+    /// Instantiates a new `InstStartSave` from a passed slot id.
     #[must_use]
     pub fn new(slot_id: usize) -> Self {
         Self { slot_id }
@@ -755,6 +982,7 @@ impl Display for InstStartSave {
     }
 }
 
+/// An internal representation of the `EndSave` opcode.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstEndSave {
     pub slot_id: usize,
@@ -763,6 +991,7 @@ pub struct InstEndSave {
 impl InstEndSave {
     pub const OPCODE_BINARY_REPR: u64 = 8;
 
+    /// Instantiates a new `InstEndSave` from a passed slot id.
     #[must_use]
     pub fn new(slot_id: usize) -> Self {
         Self { slot_id }
@@ -775,6 +1004,7 @@ impl Display for InstEndSave {
     }
 }
 
+/// An internal representation of the `Match` opcode.
 #[derive(Debug, PartialEq)]
 pub struct InstMatch;
 
@@ -907,12 +1137,12 @@ fn add_thread<const SG: usize>(
     // Don't visit states we've already added.
     let inst = match program.get(inst_idx.as_usize()) {
         // if the thread is already defined, return.
-        Some(inst) if thread_list.gen.contains(&inst.id) => return thread_list,
+        Some(inst) if thread_list.gen.contains(&inst.offset) => return thread_list,
         // if it's the end of the program without a match instruction, return.
         None => return thread_list,
         // Otherwise add the new thread.
         Some(inst) => {
-            thread_list.gen.insert(inst.id);
+            thread_list.gen.insert(inst.offset);
             inst
         }
     };
@@ -1389,6 +1619,11 @@ mod tests {
                 Opcode::ConsumeSet(InstConsumeSet::member_of(7)),
             ),
             (None, Opcode::ConsumeSet(InstConsumeSet::member_of(6))),
+            (
+                Some([SaveGroupSlot::complete(0, 1)]),
+                Opcode::ConsumeSet(InstConsumeSet::member_of(8)),
+            ),
+            (None, Opcode::ConsumeSet(InstConsumeSet::member_of(9))),
         ];
 
         let input = "aab";
@@ -1404,6 +1639,12 @@ mod tests {
                     CharacterSet::exclusive(CharacterAlphabet::Range('a'..='z')),
                     CharacterSet::inclusive(CharacterAlphabet::Range('x'..='z')),
                     CharacterSet::exclusive(CharacterAlphabet::Range('x'..='z')),
+                    CharacterSet::inclusive(CharacterAlphabet::UnicodeCategory(
+                        UnicodeCategory::Letter,
+                    )),
+                    CharacterSet::exclusive(CharacterAlphabet::UnicodeCategory(
+                        UnicodeCategory::Letter,
+                    )),
                 ])
                 .with_opcodes(vec![
                     Opcode::StartSave(InstStartSave::new(0)),
@@ -1486,6 +1727,35 @@ mod tests {
             .with_sets(vec![CharacterSet::inclusive(CharacterAlphabet::Range(
                 '0'..='9',
             ))])
+            .with_opcodes(vec![
+                Opcode::StartSave(InstStartSave::new(0)),
+                Opcode::ConsumeSet(InstConsumeSet::new(0)),
+                Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(5))),
+                Opcode::ConsumeSet(InstConsumeSet::new(0)),
+                Opcode::Jmp(InstJmp::new(InstIndex::from(2))),
+                Opcode::EndSave(InstEndSave::new(0)),
+                Opcode::Match,
+            ]);
+
+        for (case_id, (expected_res, input)) in tests.into_iter().enumerate() {
+            let res = run::<1>(&prog, input);
+            assert_eq!((case_id, expected_res), (case_id, res));
+        }
+    }
+
+    #[test]
+    fn should_evaluate_eager_unicode_category_one_or_more_expression() {
+        let tests = vec![
+            (None, "123"),
+            (Some([SaveGroupSlot::complete(0, 1)]), "a12"),
+            (Some([SaveGroupSlot::complete(0, 3)]), "aab"),
+        ];
+
+        // `^\p{Letter}+`
+        let prog = Instructions::default()
+            .with_sets(vec![CharacterSet::inclusive(
+                CharacterAlphabet::UnicodeCategory(UnicodeCategory::Letter),
+            )])
             .with_opcodes(vec![
                 Opcode::StartSave(InstStartSave::new(0)),
                 Opcode::ConsumeSet(InstConsumeSet::new(0)),

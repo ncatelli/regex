@@ -140,7 +140,7 @@ impl ToBytecode for CharacterSet {
             CharacterAlphabet::Range(_) => (0u8, 1),
             CharacterAlphabet::Explicit(ref chars) => (1u8, chars.len()),
             CharacterAlphabet::Ranges(ref ranges) => (2u8, ranges.len()),
-            CharacterAlphabet::UnicodeCategory(_) => todo!(),
+            CharacterAlphabet::UnicodeCategory(_) => (3, 1),
         };
 
         let truncated_alphabet_cnt: u32 = len
@@ -198,7 +198,48 @@ impl ToBytecode for CharacterAlphabet {
                     merged.to_vec()
                 })
                 .collect(),
-            CharacterAlphabet::UnicodeCategory(_) => todo!(),
+            CharacterAlphabet::UnicodeCategory(category) => match category {
+                UnicodeCategory::Letter => 0u64,
+                UnicodeCategory::LowercaseLetter => 1u64,
+                UnicodeCategory::UppercaseLetter => 2u64,
+                UnicodeCategory::TitlecaseLetter => 3u64,
+                UnicodeCategory::CasedLetter => 4u64,
+                UnicodeCategory::ModifiedLetter => 5u64,
+                UnicodeCategory::OtherLetter => 6u64,
+                UnicodeCategory::Mark => 7u64,
+                UnicodeCategory::NonSpacingMark => 8u64,
+                UnicodeCategory::SpacingCombiningMark => 9u64,
+                UnicodeCategory::EnclosingMark => 10u64,
+                UnicodeCategory::Separator => 11u64,
+                UnicodeCategory::SpaceSeparator => 13u64,
+                UnicodeCategory::LineSeparator => 14u64,
+                UnicodeCategory::ParagraphSeparator => 15u64,
+                UnicodeCategory::Symbol => 16u64,
+                UnicodeCategory::MathSymbol => 17u64,
+                UnicodeCategory::CurrencySymbol => 18u64,
+                UnicodeCategory::ModifierSymbol => 19u64,
+                UnicodeCategory::OtherSymbol => 20u64,
+                UnicodeCategory::Number => 21u64,
+                UnicodeCategory::DecimalDigitNumber => 22u64,
+                UnicodeCategory::LetterNumber => 23u64,
+                UnicodeCategory::OtherNumber => 24u64,
+                UnicodeCategory::Punctuation => 25u64,
+                UnicodeCategory::DashPunctuation => 26u64,
+                UnicodeCategory::OpenPunctuation => 27u64,
+                UnicodeCategory::ClosePunctuation => 28u64,
+                UnicodeCategory::InitialPunctuation => 29u64,
+                UnicodeCategory::FinalPunctuation => 30u64,
+                UnicodeCategory::ConnectorPunctuation => 31u64,
+                UnicodeCategory::OtherPunctuation => 32u64,
+                UnicodeCategory::Other => 33u64,
+                UnicodeCategory::Control => 34u64,
+                UnicodeCategory::Format => 35u64,
+                UnicodeCategory::PrivateUse => 36u64,
+                UnicodeCategory::Surrogate => 37u64,
+                UnicodeCategory::Unassigned => 38u64,
+            }
+            .to_le_bytes()
+            .to_vec(),
         }
     }
 }

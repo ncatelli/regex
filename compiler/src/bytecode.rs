@@ -131,6 +131,9 @@ impl ToBytecode for CharacterSet {
     type Output = Vec<u8>;
 
     fn to_bytecode(&self) -> Self::Output {
+        /// all bytes need to be aligned on a 16-byte (128-bit) boundary.
+        const ALIGNMENT: u32 = 16;
+
         let header = Self::MAGIC_NUMBER;
         let membership = match self.membership {
             SetMembership::Inclusive => 0u8,
@@ -150,13 +153,21 @@ impl ToBytecode for CharacterSet {
         let variant_and_membership = ((membership as u16) << 2) | (set_variant as u16);
         let variant_and_membership_bytes = variant_and_membership.to_le_bytes();
         let lower_32_bytes = merge_arrays(header.to_le_bytes(), variant_and_membership_bytes);
-        let lower_64_bytes: [u8; 8] =
+        let char_set_header: [u8; 8] =
             merge_arrays(lower_32_bytes, truncated_alphabet_cnt.to_le_bytes());
 
         let entries = self.set.to_bytecode();
 
-        let set_block: [u8; 16] = merge_arrays(lower_64_bytes, [0u8; 8]);
-        set_block.into_iter().chain(entries.into_iter()).collect()
+        // the size in bytes of all the entries plus the char set header (64-bits)
+        let char_set_byte_cnt = (entries.len() as u32) + 8;
+        let align_up_to = (char_set_byte_cnt + (ALIGNMENT - 1)) & ALIGNMENT.wrapping_neg();
+        let padding = (align_up_to - char_set_byte_cnt) as usize;
+
+        char_set_header
+            .into_iter()
+            .chain(entries.into_iter())
+            .chain([0u8].into_iter().cycle().take(padding))
+            .collect()
     }
 }
 
@@ -164,9 +175,6 @@ impl ToBytecode for CharacterAlphabet {
     type Output = Vec<u8>;
 
     fn to_bytecode(&self) -> Self::Output {
-        /// all bytes need to be aligned on a 16-byte (128-bit) boundary.
-        const ALIGNMENT: u32 = 16;
-
         match self {
             CharacterAlphabet::Range(r) => {
                 let start = *(r.start()) as u32;
@@ -175,19 +183,11 @@ impl ToBytecode for CharacterAlphabet {
                 let merged: [u8; 8] = merge_arrays(start.to_le_bytes(), end.to_le_bytes());
                 merged.to_vec()
             }
-            CharacterAlphabet::Explicit(chars) => {
-                let char_cnt = chars.len() as u32;
-                let byte_cnt: u32 = char_cnt * 4;
-                let align_up_to = (byte_cnt + (ALIGNMENT - 1)) & ALIGNMENT.wrapping_neg();
-                let padding = (align_up_to - byte_cnt) as usize;
-
-                chars
-                    .iter()
-                    .map(|c| *c as u32)
-                    .flat_map(|c| c.to_le_bytes())
-                    .chain([0u8].into_iter().cycle().take(padding))
-                    .collect()
-            }
+            CharacterAlphabet::Explicit(chars) => chars
+                .iter()
+                .map(|c| *c as u32)
+                .flat_map(|c| c.to_le_bytes())
+                .collect(),
             CharacterAlphabet::Ranges(ranges) => ranges
                 .iter()
                 .flat_map(|range| {
@@ -350,9 +350,62 @@ mod tests {
     use super::*;
 
     #[test]
-    fn should_encode_instruction_into_expected_bytecode_representation() {
-        use super::ToBytecode;
+    fn should_encode_character_sets_to_correct_bytecode_representation() {
+        let input_output = [
+            (
+                CharacterSet::inclusive(CharacterAlphabet::Explicit(vec!['a'])),
+                vec![26, 26, 1, 0, 1, 0, 0, 0, 97, 0, 0, 0, 0, 0, 0, 0],
+            ),
+            (
+                CharacterSet::exclusive(CharacterAlphabet::Explicit(vec!['a'])),
+                vec![26, 26, 5, 0, 1, 0, 0, 0, 97, 0, 0, 0, 0, 0, 0, 0],
+            ),
+            (
+                CharacterSet::inclusive(CharacterAlphabet::Range('a'..='z')),
+                vec![26, 26, 0, 0, 1, 0, 0, 0, 97, 0, 0, 0, 122, 0, 0, 0],
+            ),
+            (
+                CharacterSet::exclusive(CharacterAlphabet::Range('a'..='z')),
+                vec![26, 26, 4, 0, 1, 0, 0, 0, 97, 0, 0, 0, 122, 0, 0, 0],
+            ),
+            (
+                CharacterSet::inclusive(CharacterAlphabet::Ranges(vec!['a'..='z'])),
+                vec![26, 26, 2, 0, 1, 0, 0, 0, 97, 0, 0, 0, 122, 0, 0, 0],
+            ),
+            (
+                CharacterSet::exclusive(CharacterAlphabet::Ranges(vec!['a'..='z'])),
+                vec![26, 26, 6, 0, 1, 0, 0, 0, 97, 0, 0, 0, 122, 0, 0, 0],
+            ),
+            (
+                CharacterSet::exclusive(CharacterAlphabet::Ranges(vec!['a'..='z'])),
+                vec![26, 26, 6, 0, 1, 0, 0, 0, 97, 0, 0, 0, 122, 0, 0, 0],
+            ),
+            (
+                CharacterSet::exclusive(CharacterAlphabet::UnicodeCategory(
+                    UnicodeCategory::DecimalDigitNumber,
+                )),
+                vec![26, 26, 7, 0, 1, 0, 0, 0, 22, 0, 0, 0, 0, 0, 0, 0],
+            ),
+            (
+                CharacterSet::inclusive(CharacterAlphabet::UnicodeCategory(
+                    UnicodeCategory::DecimalDigitNumber,
+                )),
+                vec![26, 26, 3, 0, 1, 0, 0, 0, 22, 0, 0, 0, 0, 0, 0, 0],
+            ),
+        ];
 
+        for (test_case, (char_set, expected_output)) in input_output.into_iter().enumerate() {
+            let generated_bytecode = char_set.to_bytecode();
+
+            assert_eq!(
+                (test_case, expected_output),
+                (test_case, generated_bytecode)
+            );
+        }
+    }
+
+    #[test]
+    fn should_encode_instruction_into_expected_bytecode_representation() {
         let input_output = [
             (
                 Opcode::Any,

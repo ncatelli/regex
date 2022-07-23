@@ -47,11 +47,18 @@ impl ToBytecode for Instructions {
         let header_bytes: [u8; 2] = (Self::MAGIC_NUMBER as u16).to_le_bytes();
         let lower_32_bits: [u8; 4] = merge_arrays(header_bytes, (ff_variant as u16).to_le_bytes());
         let lower_64_bits: [u8; 8] = merge_arrays(lower_32_bits, [0u8; 4]);
+        let middle_64_bits: [u8; 8] = merge_arrays(set_cnt.to_le_bytes(), inst_cnt.to_le_bytes());
+        let lower_128_bits: [u8; 16] = merge_arrays(lower_64_bits, middle_64_bits);
 
-        let upper_64_bits: [u8; 8] = merge_arrays(set_cnt.to_le_bytes(), inst_cnt.to_le_bytes());
-        let _header: [u8; 16] = merge_arrays(lower_64_bits, upper_64_bits);
+        // todo
+        let inst_offset = [0u8; 4];
+        let inst_offset_and_unused: [u8; 8] = merge_arrays(inst_offset, [0u8; 4]);
+        let unused = [0u8; 8];
+        let upper_128_bits: [u8; 16] = merge_arrays(inst_offset_and_unused, unused);
 
-        todo!()
+        let header: [u8; 32] = merge_arrays(lower_128_bits, upper_128_bits);
+
+        header.to_vec()
     }
 }
 

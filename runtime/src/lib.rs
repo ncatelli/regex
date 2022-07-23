@@ -179,7 +179,7 @@ pub enum FastForward {
     /// Represents a single character.
     Char(char),
     /// Represents a set of characters that could be consuming.
-    Set(CharacterSet),
+    Set(usize),
     /// Represents that no fast-forward should be performed.
     None,
 }
@@ -201,6 +201,8 @@ pub struct Instructions {
 }
 
 impl Instructions {
+    pub const MAGIC_NUMBER: u16 = 0xF0F0;
+
     /// Instantiates a program from a predefined list of operations and
     /// character sets. By default fast_forward is disabled.
     #[must_use]
@@ -331,12 +333,12 @@ pub struct InstIndex(u32);
 
 impl InstIndex {
     #[inline]
-    fn as_u32(self) -> u32 {
+    pub fn as_u32(self) -> u32 {
         self.0
     }
 
     #[inline]
-    fn as_usize(self) -> usize {
+    pub fn as_usize(self) -> usize {
         self.0 as usize
     }
 }
@@ -366,6 +368,11 @@ impl std::ops::Add<Self> for InstIndex {
         InstIndex::from(new_ptr)
     }
 }
+
+/// A wrapper type for the binary representation of an opcode in little-endian
+/// format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OpcodeBytecodeRepr(pub [u8; 16]);
 
 /// A runtime instruction, containing an offset and a corresponding instruction.
 #[derive(Debug, PartialEq)]
@@ -503,6 +510,8 @@ impl Display for Opcode {
 pub struct InstAny;
 
 impl InstAny {
+    pub const OPCODE_BINARY_REPR: u64 = 1;
+
     /// Instantiates a new `InstAny`.
     pub const fn new() -> Self {
         Self
@@ -529,6 +538,8 @@ pub struct InstConsume {
 }
 
 impl InstConsume {
+    pub const OPCODE_BINARY_REPR: u64 = 2;
+
     /// Instantiates a new `InstConsume` with the expected matching char.
     #[must_use]
     pub fn new(value: char) -> Self {
@@ -576,11 +587,13 @@ pub trait CharacterSetRepresentable: Into<CharacterSet> {}
 /// membership to a character alphabet.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CharacterSet {
-    membership: SetMembership,
-    set: CharacterAlphabet,
+    pub membership: SetMembership,
+    pub set: CharacterAlphabet,
 }
 
 impl CharacterSet {
+    pub const MAGIC_NUMBER: u16 = 0x1A1A;
+
     /// Instantiates an inclusive character set from a passed alphabet.
     pub fn inclusive(set: CharacterAlphabet) -> Self {
         Self {
@@ -818,6 +831,8 @@ pub struct InstConsumeSet {
 }
 
 impl InstConsumeSet {
+    pub const OPCODE_BINARY_REPR: u64 = 3;
+
     /// Instantiate a new `InstConsumeSet` with a passed index.
     pub fn new(idx: usize) -> Self {
         Self::member_of(idx)
@@ -832,36 +847,6 @@ impl InstConsumeSet {
 impl Display for InstConsumeSet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "ConsumeSet: {{{:04}}}", self.idx)
-    }
-}
-
-/// An internal representation of the `Split` opcode.
-#[derive(Debug, Clone, PartialEq)]
-pub struct InstSplit {
-    x_branch: InstIndex,
-    y_branch: InstIndex,
-}
-
-impl InstSplit {
-    /// Instantiates a new `InstSplit` from two branching program counter
-    /// values.
-    #[must_use]
-    pub fn new(x: InstIndex, y: InstIndex) -> Self {
-        Self {
-            x_branch: x,
-            y_branch: y,
-        }
-    }
-}
-
-impl Display for InstSplit {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Split: ({:04}), ({:04})",
-            self.x_branch.as_u32(),
-            self.y_branch.as_u32()
-        )
     }
 }
 
@@ -884,6 +869,8 @@ pub struct InstEpsilon {
 }
 
 impl InstEpsilon {
+    pub const OPCODE_BINARY_REPR: u64 = 4;
+
     /// Instantiates a new `InstEpsilon` from a passed condition.
     pub fn new(cond: EpsilonCond) -> Self {
         Self { cond }
@@ -906,13 +893,47 @@ impl Display for InstEpsilon {
     }
 }
 
+/// An internal representation of the `Split` opcode.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InstSplit {
+    pub x_branch: InstIndex,
+    pub y_branch: InstIndex,
+}
+
+impl InstSplit {
+    pub const OPCODE_BINARY_REPR: u64 = 5;
+
+    /// Instantiates a new `InstSplit` from two branching program counter
+    /// values.
+    #[must_use]
+    pub fn new(x: InstIndex, y: InstIndex) -> Self {
+        Self {
+            x_branch: x,
+            y_branch: y,
+        }
+    }
+}
+
+impl Display for InstSplit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Split: ({:04}), ({:04})",
+            self.x_branch.as_u32(),
+            self.y_branch.as_u32()
+        )
+    }
+}
+
 /// An internal representation of the `Jmp` opcode.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstJmp {
-    next: InstIndex,
+    pub next: InstIndex,
 }
 
 impl InstJmp {
+    pub const OPCODE_BINARY_REPR: u64 = 6;
+
     /// Instnatiates a new `InstJump` from a past program counter value.
     pub fn new(next: InstIndex) -> Self {
         Self { next }
@@ -928,10 +949,12 @@ impl Display for InstJmp {
 /// An internal representation of the `StartSave` opcode.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstStartSave {
-    slot_id: usize,
+    pub slot_id: usize,
 }
 
 impl InstStartSave {
+    pub const OPCODE_BINARY_REPR: u64 = 7;
+
     /// Instantiates a new `InstStartSave` from a passed slot id.
     #[must_use]
     pub fn new(slot_id: usize) -> Self {
@@ -948,10 +971,12 @@ impl Display for InstStartSave {
 /// An internal representation of the `EndSave` opcode.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstEndSave {
-    slot_id: usize,
+    pub slot_id: usize,
 }
 
 impl InstEndSave {
+    pub const OPCODE_BINARY_REPR: u64 = 8;
+
     /// Instantiates a new `InstEndSave` from a passed slot id.
     #[must_use]
     pub fn new(slot_id: usize) -> Self {
@@ -968,6 +993,10 @@ impl Display for InstEndSave {
 /// An internal representation of the `Match` opcode.
 #[derive(Debug, PartialEq)]
 pub struct InstMatch;
+
+impl InstMatch {
+    pub const OPCODE_BINARY_REPR: u64 = 9;
+}
 
 impl Display for InstMatch {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1342,7 +1371,7 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
             |(_, window)| match (window.current(), &program.fast_forward) {
                 (None, _) | (_, FastForward::None) => false,
                 (Some(c), FastForward::Char(first_match)) => c != *first_match,
-                (Some(c), FastForward::Set(first_match)) => first_match.not_in_set(c),
+                (Some(c), FastForward::Set(set_idx)) => program.sets[*set_idx].not_in_set(c),
             },
         );
 

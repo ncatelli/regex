@@ -1348,9 +1348,6 @@ fn add_thread<const SG: usize>(
             }
         }
 
-        // catch-all todo state
-        Opcode::Epsilon(InstEpsilon { .. }) => todo!(),
-
         _ => {
             thread_list.threads.push(t);
             thread_list

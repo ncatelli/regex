@@ -27,6 +27,9 @@ impl ToBytecode for Instructions {
     type Output = Vec<u8>;
 
     fn to_bytecode(&self) -> Self::Output {
+        // header is 256-bits
+        const HEADER_LEN: u32 = 32;
+
         let set_cnt: u32 = self
             .sets
             .len()
@@ -38,27 +41,39 @@ impl ToBytecode for Instructions {
             .try_into()
             .expect("program count overflows 32-bit integer");
 
-        let (ff_variant, _ff_value) = match self.fast_forward {
+        let (ff_variant, ff_value) = match self.fast_forward {
             FastForward::None => (0u8, 0u32),
             FastForward::Char(c) => (1u8, c as u32),
             FastForward::Set(idx) => (2u8, idx as u32),
         };
 
+        let set_bytes: Vec<u8> = self.sets.iter().flat_map(|s| s.to_bytecode()).collect();
+        let instruction_bytes = self
+            .program
+            .iter()
+            .map(|inst| inst.to_bytecode())
+            .flat_map(|or| or.0);
+
+        let inst_offset = HEADER_LEN + (set_bytes.len() as u32);
+
         let header_bytes: [u8; 2] = (Self::MAGIC_NUMBER as u16).to_le_bytes();
         let lower_32_bits: [u8; 4] = merge_arrays(header_bytes, (ff_variant as u16).to_le_bytes());
-        let lower_64_bits: [u8; 8] = merge_arrays(lower_32_bits, [0u8; 4]);
-        let middle_64_bits: [u8; 8] = merge_arrays(set_cnt.to_le_bytes(), inst_cnt.to_le_bytes());
+        let lower_64_bits: [u8; 8] = merge_arrays(lower_32_bits, set_cnt.to_le_bytes());
+        let middle_64_bits: [u8; 8] =
+            merge_arrays(inst_cnt.to_le_bytes(), inst_offset.to_le_bytes());
         let lower_128_bits: [u8; 16] = merge_arrays(lower_64_bits, middle_64_bits);
 
-        // todo
-        let inst_offset = [0u8; 4];
-        let inst_offset_and_unused: [u8; 8] = merge_arrays(inst_offset, [0u8; 4]);
+        let ff_value_or_offset_and_unused: [u8; 8] = merge_arrays(ff_value.to_le_bytes(), [0u8; 4]);
         let unused = [0u8; 8];
-        let upper_128_bits: [u8; 16] = merge_arrays(inst_offset_and_unused, unused);
+        let upper_128_bits: [u8; 16] = merge_arrays(ff_value_or_offset_and_unused, unused);
 
         let header: [u8; 32] = merge_arrays(lower_128_bits, upper_128_bits);
 
-        header.to_vec()
+        header
+            .into_iter()
+            .chain(set_bytes.into_iter())
+            .chain(instruction_bytes)
+            .collect()
     }
 }
 

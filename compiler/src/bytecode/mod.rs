@@ -38,13 +38,15 @@ impl ToBytecode for Instructions {
             .try_into()
             .expect("program count overflows 32-bit integer");
 
-        let (_ff_variant, _ff_value) = match self.fast_forward {
+        let (ff_variant, _ff_value) = match self.fast_forward {
             FastForward::None => (0u8, 0u32),
             FastForward::Char(c) => (1u8, c as u32),
-            FastForward::Set(_) => (2u8, 0),
+            FastForward::Set(idx) => (2u8, idx as u32),
         };
 
-        let lower_64_bits: [u8; 8] = (Self::MAGIC_NUMBER as u64).to_le_bytes();
+        let header_bytes: [u8; 2] = (Self::MAGIC_NUMBER as u16).to_le_bytes();
+        let lower_32_bits: [u8; 4] = merge_arrays(header_bytes, (ff_variant as u16).to_le_bytes());
+        let lower_64_bits: [u8; 8] = merge_arrays(lower_32_bits, [0u8; 4]);
 
         let upper_64_bits: [u8; 8] = merge_arrays(set_cnt.to_le_bytes(), inst_cnt.to_le_bytes());
         let _header: [u8; 16] = merge_arrays(lower_64_bits, upper_64_bits);

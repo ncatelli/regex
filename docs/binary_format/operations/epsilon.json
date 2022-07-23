@@ -1,0 +1,19 @@
+[
+	{
+		"name": 4,
+		"attr": "opcode",
+		"bits": 4
+	},
+	{
+		"attr": "unused",
+		"bits": 60
+	},
+	{
+		"bits": 3,
+		"name": "cond"
+	},
+	{
+		"attr": "unused",
+		"bits": 61
+	}
+]

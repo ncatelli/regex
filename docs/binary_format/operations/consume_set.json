@@ -1,0 +1,15 @@
+[
+	{
+		"name": 3,
+		"attr": "opcode",
+		"bits": 4
+	},
+	{
+		"attr": "unused",
+		"bits": 60
+	},
+	{
+		"bits": 64,
+		"name": "set id"
+	}
+]

@@ -1,0 +1,10 @@
+[
+	{
+		"name": "lower bound",
+		"bits": 32
+	},
+	{
+		"name": "upper bound",
+		"bits": 32
+	}
+]

@@ -1,0 +1,19 @@
+[
+	{
+		"name": 2,
+		"attr": "opcode",
+		"bits": 4
+	},
+	{
+		"attr": "unused",
+		"bits": 60
+	},
+	{
+		"bits": 32,
+		"name": "chararacter"
+	},
+	{
+		"bits": 32,
+		"attr": "unused"
+	}
+]

@@ -350,6 +350,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn should_encode_header_to_correct_bytecode_representation() {
+        let input_output = [(
+            Instructions::new(vec![], vec![Opcode::Any, Opcode::Match]),
+            vec![
+                240, 240, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            ],
+        )];
+
+        for (test_case, (char_set, expected_output)) in input_output.into_iter().enumerate() {
+            let generated_bytecode = char_set.to_bytecode();
+
+            // assert the bytecode is 16-byte (128-bit) aligned
+            assert!((test_case, generated_bytecode.len() % 16) == (test_case, 0));
+
+            // assert the generated output matches the expected output
+            assert_eq!(
+                (test_case, expected_output),
+                (test_case, generated_bytecode)
+            );
+        }
+    }
+
+    #[test]
     fn should_encode_character_sets_to_correct_bytecode_representation() {
         let input_output = [
             (
@@ -381,6 +406,13 @@ mod tests {
                 vec![26, 26, 6, 0, 1, 0, 0, 0, 97, 0, 0, 0, 122, 0, 0, 0],
             ),
             (
+                CharacterSet::exclusive(CharacterAlphabet::Ranges(vec!['a'..='z', 'A'..='Z'])),
+                vec![
+                    26, 26, 6, 0, 2, 0, 0, 0, 97, 0, 0, 0, 122, 0, 0, 0, 65, 0, 0, 0, 90, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0,
+                ],
+            ),
+            (
                 CharacterSet::exclusive(CharacterAlphabet::UnicodeCategory(
                     UnicodeCategory::DecimalDigitNumber,
                 )),
@@ -397,6 +429,10 @@ mod tests {
         for (test_case, (char_set, expected_output)) in input_output.into_iter().enumerate() {
             let generated_bytecode = char_set.to_bytecode();
 
+            // assert the bytecode is 16-byte (128-bit) aligned
+            assert!((test_case, generated_bytecode.len() % 16) == (test_case, 0));
+
+            // assert the generated output matches the expected output
             assert_eq!(
                 (test_case, expected_output),
                 (test_case, generated_bytecode)

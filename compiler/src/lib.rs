@@ -47,5 +47,6 @@ pub mod bytecode;
 pub mod compiler;
 pub mod parser;
 
+pub use bytecode::to_binary;
 pub use compiler::compile;
 pub use parser::{parse, ParseErr};

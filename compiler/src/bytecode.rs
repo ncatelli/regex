@@ -1,4 +1,34 @@
+//! Provides the traits and functions for converting a runtime program to its
+//! corresponding binary representation.
+
 use regex_runtime::*;
+
+/// Accepts a parsed AST and attempts to compile it into a runnable bytecode
+/// program for use with the regex-runtime crate.
+///
+/// # Example
+///
+/// ```
+/// use regex_compiler::bytecode::ToBytecode;
+/// use regex_runtime::{Instructions, Opcode};
+///
+/// let input = Instructions::new(vec![], vec![Opcode::Any, Opcode::Match]);
+/// let expected_output = vec![
+///     240, 240, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+///     0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0,
+///     0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+/// ];
+///
+///
+/// let generated_bytecode = input.to_bytecode();
+/// assert_eq!(
+///     expected_output,
+///     generated_bytecode
+/// );
+/// ```
+pub fn to_binary(insts: Instructions) -> Result<Vec<u8>, String> {
+    Ok(insts.to_bytecode())
+}
 
 /// Merges two arrays.
 ///

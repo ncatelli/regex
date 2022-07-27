@@ -74,7 +74,12 @@ impl ToBytecode for Instructions {
         let (ff_variant, ff_value) = match self.fast_forward {
             FastForward::None => (0u16, 0u32),
             FastForward::Char(c) => (1u16, c as u32),
-            FastForward::Set(idx) => (2u16, idx as u32),
+            FastForward::Set(idx) => {
+                let set_idx: u32 = idx
+                    .try_into()
+                    .expect("program count overflows 32-bit integer");
+                (2u16, set_idx)
+            }
         };
 
         let set_bytes: Vec<u8> = self.sets.iter().flat_map(|s| s.to_bytecode()).collect();
@@ -86,7 +91,7 @@ impl ToBytecode for Instructions {
 
         let inst_offset = HEADER_LEN + (set_bytes.len() as u32);
 
-        let header_bytes: [u8; 2] = (Self::MAGIC_NUMBER as u16).to_le_bytes();
+        let header_bytes: [u8; 2] = Self::MAGIC_NUMBER.to_le_bytes();
         let lower_32_bits: [u8; 4] = merge_arrays(header_bytes, ff_variant.to_le_bytes());
         let lower_64_bits: [u8; 8] = merge_arrays(lower_32_bits, set_cnt.to_le_bytes());
         let middle_64_bits: [u8; 8] =
@@ -170,7 +175,7 @@ impl ToBytecode for CharacterSet {
             SetMembership::Exclusive => 1u16,
         };
         let (set_variant, len) = match self.set {
-            CharacterAlphabet::Range(_) => (0u16, 1usize),
+            CharacterAlphabet::Range(_) => (0u16, 1),
             CharacterAlphabet::Explicit(ref chars) => (1, chars.len()),
             CharacterAlphabet::Ranges(ref ranges) => (2, ranges.len()),
             CharacterAlphabet::UnicodeCategory(_) => (3, 1),
@@ -189,9 +194,15 @@ impl ToBytecode for CharacterSet {
         let entries = self.set.to_bytecode();
 
         // the size in bytes of all the entries plus the char set header (64-bits)
-        let char_set_byte_cnt = (entries.len() as u32) + 8;
+        let char_set_byte_cnt = TryInto::<u32>::try_into(entries.len())
+            .map(|v| v + 8)
+            // should be safe to assume this fits within 32 bytes. panic otherwise
+            .expect("char_set overflows 32-bit integer");
         let align_up_to = (char_set_byte_cnt + (ALIGNMENT - 1)) & ALIGNMENT.wrapping_neg();
-        let padding = (align_up_to - char_set_byte_cnt) as usize;
+        // similarly, it shoudl be safe to assume this fits within a usize,
+        // any case where it can't for a platform it should just panic.
+        let padding = TryInto::<usize>::try_into(align_up_to - char_set_byte_cnt)
+            .expect("aligned char set overflows 32-bit integer");
 
         char_set_header
             .into_iter()

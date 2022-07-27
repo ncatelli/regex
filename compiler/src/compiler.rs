@@ -194,8 +194,7 @@ pub fn compile(regex_ast: ast::Regex) -> Result<Instructions, String> {
                     Instructions::new(sets, insts).with_fast_forward(FastForward::Char(value))
                 }
                 (false, Some(Opcode::ConsumeSet(InstConsumeSet { idx }))) => {
-                    let ff_set = sets[idx].clone();
-                    Instructions::new(sets, insts).with_fast_forward(FastForward::Set(ff_set))
+                    Instructions::new(sets, insts).with_fast_forward(FastForward::Set(idx))
                 }
                 (
                     false,

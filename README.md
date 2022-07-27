@@ -8,6 +8,7 @@
 		- [Examples](#examples)
 			- [Building](#building)
 	- [Usage](#usage)
+	- [Binary Representation](#binary-representation)
 	- [Grammar](#grammar)
 	- [Acknowledgements](#acknowledgements)
 
@@ -68,6 +69,9 @@ assert_eq!(
 	result
 )
 ```
+
+## Binary Representation
+A binary format has been provided for compiling runtime program down to an embeddable binary representation. Documenation on the structure can be found at [binary format](./docs/binary_format/README.md).
 
 ## Grammar
 The grammar can be found at [regex.ebnf](./docs/regex.ebnf) and based on excellent grammar from [kean](https://kean.blog). Additionally this includes an [xhtml version](./docs/regex.xhtml) for viewing in a browser. This was directly generated from [regex.ebnf](./docs/regex.ebnf) with [rr](https://githug.com/ncatelli/rr-docker.git).

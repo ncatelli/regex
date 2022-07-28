@@ -72,9 +72,14 @@ impl ToBytecode for Instructions {
             .expect("program count overflows 32-bit integer");
 
         let (ff_variant, ff_value) = match self.fast_forward {
-            FastForward::None => (0u8, 0u32),
-            FastForward::Char(c) => (1u8, c as u32),
-            FastForward::Set(idx) => (2u8, idx as u32),
+            FastForward::None => (0u16, 0u32),
+            FastForward::Char(c) => (1u16, c as u32),
+            FastForward::Set(idx) => {
+                let set_idx: u32 = idx
+                    .try_into()
+                    .expect("program count overflows 32-bit integer");
+                (2u16, set_idx)
+            }
         };
 
         let set_bytes: Vec<u8> = self.sets.iter().flat_map(|s| s.to_bytecode()).collect();
@@ -84,10 +89,12 @@ impl ToBytecode for Instructions {
             .map(|inst| inst.to_bytecode())
             .flat_map(|or| or.0);
 
-        let inst_offset = HEADER_LEN + (set_bytes.len() as u32);
+        let inst_offset = u32::try_from(set_bytes.len())
+            .map(|len| HEADER_LEN + len)
+            .expect("set bytes overflows 32-bit integer");
 
-        let header_bytes: [u8; 2] = (Self::MAGIC_NUMBER as u16).to_le_bytes();
-        let lower_32_bits: [u8; 4] = merge_arrays(header_bytes, (ff_variant as u16).to_le_bytes());
+        let header_bytes: [u8; 2] = Self::MAGIC_NUMBER.to_le_bytes();
+        let lower_32_bits: [u8; 4] = merge_arrays(header_bytes, ff_variant.to_le_bytes());
         let lower_64_bits: [u8; 8] = merge_arrays(lower_32_bits, set_cnt.to_le_bytes());
         let middle_64_bits: [u8; 8] =
             merge_arrays(inst_cnt.to_le_bytes(), inst_offset.to_le_bytes());
@@ -165,14 +172,14 @@ impl ToBytecode for CharacterSet {
         const ALIGNMENT: u32 = 16;
 
         let header = Self::MAGIC_NUMBER;
-        let membership = match self.membership {
-            SetMembership::Inclusive => 0u8,
-            SetMembership::Exclusive => 1u8,
+        let membership: u16 = match self.membership {
+            SetMembership::Inclusive => 0u16,
+            SetMembership::Exclusive => 1u16,
         };
         let (set_variant, len) = match self.set {
-            CharacterAlphabet::Range(_) => (0u8, 1),
-            CharacterAlphabet::Explicit(ref chars) => (1u8, chars.len()),
-            CharacterAlphabet::Ranges(ref ranges) => (2u8, ranges.len()),
+            CharacterAlphabet::Range(_) => (0u16, 1),
+            CharacterAlphabet::Explicit(ref chars) => (1, chars.len()),
+            CharacterAlphabet::Ranges(ref ranges) => (2, ranges.len()),
             CharacterAlphabet::UnicodeCategory(_) => (3, 1),
         };
 
@@ -180,7 +187,7 @@ impl ToBytecode for CharacterSet {
             .try_into()
             .expect("character alphabet count overflows 32-bit integer");
 
-        let variant_and_membership = ((membership as u16) << 2) | (set_variant as u16);
+        let variant_and_membership = (membership << 2) | (set_variant);
         let variant_and_membership_bytes = variant_and_membership.to_le_bytes();
         let lower_32_bytes = merge_arrays(header.to_le_bytes(), variant_and_membership_bytes);
         let char_set_header: [u8; 8] =
@@ -189,9 +196,15 @@ impl ToBytecode for CharacterSet {
         let entries = self.set.to_bytecode();
 
         // the size in bytes of all the entries plus the char set header (64-bits)
-        let char_set_byte_cnt = (entries.len() as u32) + 8;
+        let char_set_byte_cnt = u32::try_from(entries.len())
+            .map(|v| v + 8)
+            // should be safe to assume this fits within 32 bytes. panic otherwise
+            .expect("char_set overflows 32-bit integer");
         let align_up_to = (char_set_byte_cnt + (ALIGNMENT - 1)) & ALIGNMENT.wrapping_neg();
-        let padding = (align_up_to - char_set_byte_cnt) as usize;
+        // similarly, it shoudl be safe to assume this fits within a usize,
+        // any case where it can't for a platform it should just panic.
+        let padding = usize::try_from(align_up_to - char_set_byte_cnt)
+            .expect("aligned char set overflows 32-bit integer");
 
         char_set_header
             .into_iter()
@@ -329,7 +342,7 @@ impl ToBytecode for InstJmp {
 
     fn to_bytecode(&self) -> Self::Output {
         // pad out the next inst index from 4 to 8 bytes.
-        let padded_next_inst = self.next.as_u32() as u64;
+        let padded_next_inst: u64 = self.next.as_u32().into();
 
         let first = Self::OPCODE_BINARY_REPR.to_le_bytes();
         let second = padded_next_inst.to_le_bytes();

@@ -42,6 +42,10 @@
 //! )
 //! ```
 
+#![warn(clippy::cast_lossless)]
+#![warn(clippy::cast_possible_truncation)]
+#![warn(clippy::cast_possible_wrap)]
+
 pub mod ast;
 pub mod bytecode;
 pub mod compiler;

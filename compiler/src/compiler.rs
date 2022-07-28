@@ -60,7 +60,7 @@ enum RelativeOpcode {
 }
 
 impl RelativeOpcode {
-    fn into_opcode_with_index(self, sets: &mut Vec<CharacterSet>, idx: u32) -> Option<Opcode> {
+    fn into_opcode_with_index(self, sets: &mut Vec<CharacterSet>, idx: i32) -> Option<Opcode> {
         match self {
             RelativeOpcode::Any => Some(Opcode::Any),
             RelativeOpcode::Consume(c) => Some(Opcode::Consume(InstConsume::new(c))),
@@ -76,8 +76,7 @@ impl RelativeOpcode {
                 )))
             }
             RelativeOpcode::Jmp(rel_jmp_to) => {
-                let signed_idx = idx as i32;
-                let jmp_to: u32 = (signed_idx + rel_jmp_to).try_into().ok()?;
+                let jmp_to: u32 = (idx + rel_jmp_to).try_into().ok()?;
 
                 Some(Opcode::Jmp(InstJmp::new(InstIndex::from(jmp_to))))
             }
@@ -100,7 +99,7 @@ impl RelativeOpcode {
         }
     }
 
-    fn into_opcode_with_index_unchecked(self, sets: &mut Vec<CharacterSet>, idx: u32) -> Opcode {
+    fn into_opcode_with_index_unchecked(self, sets: &mut Vec<CharacterSet>, idx: i32) -> Opcode {
         self.into_opcode_with_index(sets, idx).unwrap()
     }
 }
@@ -173,7 +172,13 @@ pub fn compile(regex_ast: ast::Regex) -> Result<Instructions, String> {
                 .into_iter()
                 .enumerate()
                 // truncate idx to a u32
-                .map(|(idx, sets)| (idx as u32, sets))
+                .map(|(idx, sets)| {
+                    (
+                        idx.try_into()
+                            .expect("index overflows a 32-bit signed integer"),
+                        sets,
+                    )
+                })
                 .fold((vec![], vec![]), |(mut sets, mut insts), (idx, opcode)| {
                     let absolute_opcode = opcode.into_opcode_with_index_unchecked(&mut sets, idx);
                     insts.push(absolute_opcode);
@@ -774,10 +779,19 @@ fn alternations_for_supplied_relative_opcodes(
         .into_iter()
         .zip(start_end_offsets_by_subexpr.into_iter())
         .enumerate()
-        .map(|(idx, (opcodes, (start, end)))| (idx as u32, opcodes, (start as i32, end as i32)))
+        .map(|(idx, (opcodes, (start, end)))| {
+            // unwraps should be safe as these should never be able to
+            // overflow a 32-bit integer. However if they do I'd like to catch
+            // panic.
+            (
+                u32::try_from(idx).unwrap(),
+                opcodes,
+                (i32::try_from(start).unwrap(), i32::try_from(end).unwrap()),
+            )
+        })
         .map(|(idx, opcodes, start_end_offsets)| {
             let optional_next_offsets =
-                ((idx + 1) != subexpr_cnt as u32).then(|| start_end_offsets);
+                (((idx as usize) + 1) != subexpr_cnt).then(|| start_end_offsets);
             (optional_next_offsets, opcodes)
         })
         .flat_map(|(start_of_next, ops)| match start_of_next {

@@ -37,6 +37,8 @@
 use collections_ext::set::sparse::SparseSet;
 use std::fmt::{Debug, Display};
 
+pub mod binary;
+
 /// Represents a defined match group for a pattern.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SaveGroupSlot {

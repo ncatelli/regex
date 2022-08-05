@@ -4,42 +4,67 @@
 #[derive(Debug, PartialEq, Eq)]
 pub enum BytecodeConversionError {
     CharacterEncodingError(u64),
-    IntegerConversion(u64),
+    IntegerConversionTo32Bit(u64),
     OutOfBoundsEpsilonValue(u64),
-    SizeMismatch { expected: usize, received: usize },
+    ByteWidthMismatch { expected: usize, received: usize },
+}
+
+impl std::fmt::Display for BytecodeConversionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::CharacterEncodingError(val) => {
+                write!(f, "unable to encode value {} as character", val)
+            }
+            Self::IntegerConversionTo32Bit(val) => {
+                write!(f, "unable to convert {} to 32-bit value", val)
+            }
+            Self::OutOfBoundsEpsilonValue(val) => {
+                write!(f, "epsilon condition id {} out of range", val)
+            }
+            Self::ByteWidthMismatch { expected, received } => {
+                write!(
+                    f,
+                    "byte-width mismatch, expected {}, received {}",
+                    expected, received
+                )
+            }
+        }
+    }
 }
 
 /// Represents a conversion trait from a given opcodes binary little-endian
 /// representation into it's intermediary state.
-pub trait FromBytecode {
+pub trait FromBytecode<B: AsRef<[u8]>> {
     // The output type of a successful match.
     type Output;
     // An alternate error type.
     type Error;
 
-    fn from_bytecode(bin: Vec<u8>) -> Result<Self::Output, Self::Error>;
+    fn from_bytecode(bin: B) -> Result<Self::Output, Self::Error>;
 }
 
-impl FromBytecode for super::Opcode {
+impl<B: AsRef<[u8]>> FromBytecode<B> for super::Opcode {
     type Output = Self;
     type Error = BytecodeConversionError;
 
-    fn from_bytecode(bin: Vec<u8>) -> Result<Self::Output, Self::Error> {
+    fn from_bytecode(bin: B) -> Result<Self::Output, Self::Error> {
         use super::*;
 
-        let variant = bin
+        let data = bin.as_ref();
+
+        let variant = data
             .get(0..8)
             .and_then(|slice| TryInto::<[u8; 8]>::try_into(slice).ok())
             .map(u64::from_le_bytes);
-        let operand = bin
+        let operand = data
             .get(8..16)
             .and_then(|slice| TryInto::<[u8; 8]>::try_into(slice).ok())
             .map(u64::from_le_bytes);
 
         match (variant, operand) {
-            (Some(_), None) | (None, None) => Err(BytecodeConversionError::SizeMismatch {
+            (Some(_), None) | (None, None) => Err(BytecodeConversionError::ByteWidthMismatch {
                 expected: 16,
-                received: bin.len(),
+                received: data.len(),
             }),
             (Some(InstAny::OPCODE_BINARY_REPR), Some(0)) => Ok(Opcode::Any),
             (Some(InstConsume::OPCODE_BINARY_REPR), Some(char_value)) => u32::try_from(char_value)
@@ -50,7 +75,7 @@ impl FromBytecode for super::Opcode {
             (Some(InstConsumeSet::OPCODE_BINARY_REPR), Some(set_id)) => usize::try_from(set_id)
                 .ok()
                 .map(|set| Opcode::ConsumeSet(InstConsumeSet::new(set)))
-                .ok_or(BytecodeConversionError::IntegerConversion(set_id)),
+                .ok_or(BytecodeConversionError::IntegerConversionTo32Bit(set_id)),
 
             (Some(InstEpsilon::OPCODE_BINARY_REPR), Some(epsilon_kind)) => {
                 let cond = match epsilon_kind {
@@ -69,13 +94,13 @@ impl FromBytecode for super::Opcode {
 
             (Some(InstSplit::OPCODE_BINARY_REPR), Some(_)) => {
                 // should be safe to unwrap due to & truncation
-                let x_branch = bin
+                let x_branch = data
                     .get(8..12)
                     .and_then(|slice| TryInto::<[u8; 4]>::try_into(slice).ok())
                     .map(u32::from_le_bytes)
                     .map(InstIndex::from)
                     .unwrap();
-                let y_branch = bin
+                let y_branch = data
                     .get(12..16)
                     .and_then(|slice| TryInto::<[u8; 4]>::try_into(slice).ok())
                     .map(u32::from_le_bytes)
@@ -88,15 +113,15 @@ impl FromBytecode for super::Opcode {
                 .ok()
                 .map(InstIndex::from)
                 .map(|inst_idx| Opcode::Jmp(InstJmp::new(inst_idx)))
-                .ok_or(BytecodeConversionError::IntegerConversion(idx)),
+                .ok_or(BytecodeConversionError::IntegerConversionTo32Bit(idx)),
             (Some(InstStartSave::OPCODE_BINARY_REPR), Some(slot_id)) => usize::try_from(slot_id)
                 .ok()
                 .map(|slot| Opcode::StartSave(InstStartSave::new(slot)))
-                .ok_or(BytecodeConversionError::IntegerConversion(slot_id)),
+                .ok_or(BytecodeConversionError::IntegerConversionTo32Bit(slot_id)),
             (Some(InstEndSave::OPCODE_BINARY_REPR), Some(slot_id)) => usize::try_from(slot_id)
                 .ok()
                 .map(|slot| Opcode::EndSave(InstEndSave::new(slot)))
-                .ok_or(BytecodeConversionError::IntegerConversion(slot_id)),
+                .ok_or(BytecodeConversionError::IntegerConversionTo32Bit(slot_id)),
             (Some(InstMatch::OPCODE_BINARY_REPR), Some(0)) => Ok(Opcode::Match),
             (Some(_), Some(_)) => todo!(),
             _ => unreachable!(),

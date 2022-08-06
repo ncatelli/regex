@@ -341,6 +341,14 @@ mod tests {
                 CharacterSet::exclusive(CharacterAlphabet::Explicit(vec!['a'])),
             ),
             (
+                vec![26, 26, 1, 0, 2, 0, 0, 0, 97, 0, 0, 0, 98, 0, 0, 0],
+                CharacterSet::inclusive(CharacterAlphabet::Explicit(vec!['a', 'b'])),
+            ),
+            (
+                vec![26, 26, 5, 0, 2, 0, 0, 0, 97, 0, 0, 0, 98, 0, 0, 0],
+                CharacterSet::exclusive(CharacterAlphabet::Explicit(vec!['a', 'b'])),
+            ),
+            (
                 vec![26, 26, 0, 0, 1, 0, 0, 0, 97, 0, 0, 0, 122, 0, 0, 0],
                 CharacterSet::inclusive(CharacterAlphabet::Range('a'..='z')),
             ),

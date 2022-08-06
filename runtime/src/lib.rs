@@ -596,6 +596,11 @@ pub struct CharacterSet {
 impl CharacterSet {
     pub const MAGIC_NUMBER: u16 = 0x1A1A;
 
+    /// Instantiates a character set from its consituent parts.
+    pub fn new(membership: SetMembership, set: CharacterAlphabet) -> Self {
+        Self { membership, set }
+    }
+
     /// Instantiates an inclusive character set from a passed alphabet.
     pub fn inclusive(set: CharacterAlphabet) -> Self {
         Self {

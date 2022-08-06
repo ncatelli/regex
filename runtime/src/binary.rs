@@ -174,7 +174,25 @@ impl<B: AsRef<[u8]>> FromBytecode<B> for crate::CharacterSet {
                     ))
                 }
             }
-            (CharacterAlphabetVariant::Ranges, _cnt) => todo!(),
+            (CharacterAlphabetVariant::Ranges, cnt) => {
+                let element_cnt = usize::try_from(cnt)
+                    .map_err(|_| BytecodeConversionError::IntegerConversionToUsize(cnt.into()))?;
+
+                let alphabet = chunked_data
+                    .take(element_cnt)
+                    // safe to unwrap, constrained to 8-byte chunks above.
+                    .map(|slice| TryInto::<[u8; CHUNK_SIZE]>::try_into(slice).unwrap())
+                    .map(decode_range_alphabet)
+                    .collect::<Result<Vec<_>, ()>>();
+
+                if let Ok(alphabet) = alphabet {
+                    Ok(crate::CharacterAlphabet::Ranges(alphabet))
+                } else {
+                    Err(BytecodeConversionError::ValueMismatch(
+                        "alphabet variant out of range".to_string(),
+                    ))
+                }
+            }
             (CharacterAlphabetVariant::UnicodeCategory, 1) => todo!(),
             _ => Err(BytecodeConversionError::ValueMismatch(
                 "alphabet variant out of range".to_string(),
@@ -356,8 +374,7 @@ mod tests {
                 vec![26, 26, 4, 0, 1, 0, 0, 0, 97, 0, 0, 0, 122, 0, 0, 0],
                 CharacterSet::exclusive(CharacterAlphabet::Range('a'..='z')),
             ),
-            // unimplemented yet
-            /*(
+            (
                 vec![26, 26, 2, 0, 1, 0, 0, 0, 97, 0, 0, 0, 122, 0, 0, 0],
                 CharacterSet::inclusive(CharacterAlphabet::Ranges(vec!['a'..='z'])),
             ),
@@ -376,6 +393,8 @@ mod tests {
                 ],
                 CharacterSet::exclusive(CharacterAlphabet::Ranges(vec!['a'..='z', 'A'..='Z'])),
             ),
+            // unimplemented yet
+            /*
             (
                 vec![26, 26, 7, 0, 1, 0, 0, 0, 22, 0, 0, 0, 0, 0, 0, 0],
                 CharacterSet::exclusive(CharacterAlphabet::UnicodeCategory(

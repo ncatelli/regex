@@ -49,6 +49,121 @@ pub trait FromBytecode<B: AsRef<[u8]>> {
     fn from_bytecode(bin: B) -> Result<Self::Output, Self::Error>;
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum FastForwardVariant {
+    None,
+    Char,
+    Set,
+}
+
+impl TryFrom<u8> for FastForwardVariant {
+    type Error = ();
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Self::None),
+            1 => Ok(Self::Char),
+            2 => Ok(Self::Set),
+            _ => Err(()),
+        }
+    }
+}
+
+impl<B: AsRef<[u8]>> FromBytecode<B> for crate::Instructions {
+    type Output = Self;
+
+    type Error = String;
+
+    fn from_bytecode(bin: B) -> Result<Self::Output, Self::Error> {
+        const CHUNK_32BIT: usize = 4;
+        const CHUNK_128BIT: usize = 16;
+
+        // header is 32bits x 8, this takes 5, as the last 3 32-bit values are unused.
+        let mut header = bin
+            .as_ref()
+            .chunks_exact(CHUNK_32BIT)
+            // safe to unwrap due to exact chunk guarantee.
+            .map(|v| TryInto::<[u8; 4]>::try_into(v).unwrap())
+            .take(5);
+
+        let ff_variant = if let Some([0xF0, 0xF0, ff_variant, _]) = header.next() {
+            FastForwardVariant::try_from(ff_variant)
+                .map_err(|_| format!("fast-forward variant out of range: {}", ff_variant))
+        } else {
+            Err("invalid header".to_string())
+        }?;
+
+        let set_cnt = header
+            .next()
+            .ok_or_else(|| "unexpected end of header".to_string())
+            .map(u32::from_le_bytes)
+            .and_then(|val| usize::try_from(val).map_err(|e| e.to_string()))?;
+        let inst_cnt = header
+            .next()
+            .ok_or_else(|| "unexpected end of header".to_string())
+            .map(u32::from_le_bytes)
+            .and_then(|val| usize::try_from(val).map_err(|e| e.to_string()))?;
+        let inst_offset = header
+            .next()
+            .ok_or_else(|| "unexpected end of header".to_string())
+            .map(u32::from_le_bytes)
+            .and_then(|val| usize::try_from(val).map_err(|e| e.to_string()))?;
+        let ff_value = match (ff_variant, header.next()) {
+            (FastForwardVariant::None, Some(_)) => Ok(crate::FastForward::None),
+            (FastForwardVariant::Char, Some(bytes)) => char::from_u32(u32::from_le_bytes(bytes))
+                .map(crate::FastForward::Char)
+                .ok_or_else(|| "unable to deserialize fast-forward char".to_string()),
+            (FastForwardVariant::Set, Some(bytes)) => usize::try_from(u32::from_le_bytes(bytes))
+                .map(crate::FastForward::Set)
+                .map_err(|_| "unable to deserialize fast-forward char".to_string()),
+            (_, None) => Err("unexpected end of header".to_string()),
+        }?;
+
+        let inst_bytes_start = inst_offset;
+        let inst_bytes = bin
+            .as_ref()
+            .get(inst_bytes_start..)
+            .ok_or_else(|| "invalid instruction headers".to_string())?;
+
+        let insts = inst_bytes
+            .chunks_exact(CHUNK_128BIT)
+            .take(inst_cnt)
+            .map(crate::Opcode::from_bytecode)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+
+        let mut next_set_start = 32;
+        let set_bytes_end = set_cnt * 128 + next_set_start;
+
+        let mut cnt = 0;
+        let mut set_bytes = bin
+            .as_ref()
+            .get(next_set_start..set_bytes_end)
+            .ok_or_else(|| "invalid character set headers".to_string())?;
+        let mut sets = Vec::with_capacity(set_cnt);
+
+        // loop over the character sets, reborrow the binary from each sets
+        // next starting position until either the set count is hit or the end
+        // of the byte slice is hit.
+        while (cnt < set_cnt) && (next_set_start < set_bytes_end) {
+            let (set, bytes_consumed) =
+                crate::CharacterSet::from_bytecode(set_bytes).map_err(|e| e.to_string())?;
+
+            sets.push(set);
+            cnt += 1;
+            next_set_start += bytes_consumed;
+            set_bytes = bin
+                .as_ref()
+                .get(next_set_start..set_bytes_end)
+                .ok_or_else(|| "invalid character set headers".to_string())?;
+        }
+
+        let program = crate::Instructions::new(sets, insts).with_fast_forward(ff_value);
+
+        Ok(program)
+    }
+}
+
 /// Represents a runtime dispatchable set of characters variant. Functionally
 /// this is equivalent to `CharacterAlphabet` sans the enclosed values.
 #[derive(Debug, PartialEq, Eq)]
@@ -142,8 +257,12 @@ fn decode_unicode_category_alphabet(data: [u8; 8]) -> Result<crate::UnicodeCateg
     .ok_or(())
 }
 
+fn align_up<const ALIGNMENT: usize>(val: usize) -> usize {
+    (val + (ALIGNMENT - 1)) & ALIGNMENT.wrapping_neg()
+}
+
 impl<B: AsRef<[u8]>> FromBytecode<B> for crate::CharacterSet {
-    type Output = Self;
+    type Output = (Self, usize);
     type Error = BytecodeConversionError;
 
     fn from_bytecode(bin: B) -> Result<Self::Output, Self::Error> {
@@ -178,7 +297,7 @@ impl<B: AsRef<[u8]>> FromBytecode<B> for crate::CharacterSet {
                 ))
             }?;
 
-        let alphabet = match (variant, entry_cnt) {
+        let (alphabet, consumed_bytes) = match (variant, entry_cnt) {
             (CharacterAlphabetVariant::Range, 1) => {
                 let alphabet = chunked_data
                     .take(1)
@@ -188,7 +307,7 @@ impl<B: AsRef<[u8]>> FromBytecode<B> for crate::CharacterSet {
                     .next();
 
                 if let Some(Ok(alphabet)) = alphabet {
-                    Ok(alphabet)
+                    Ok((alphabet, 16))
                 } else {
                     Err(BytecodeConversionError::ValueMismatch(
                         "alphabet variant out of range".to_string(),
@@ -213,8 +332,14 @@ impl<B: AsRef<[u8]>> FromBytecode<B> for crate::CharacterSet {
                     .map(char::from_u32)
                     .collect::<Option<Vec<_>>>();
 
+                // 32-bit elements aligned on 128-bit boundaries plus a 64-bit header
+                let aligned_set_size = align_up::<16>(element_cnt * 4 + 8);
+
                 if let Some(alphabet) = alphabet {
-                    Ok(crate::CharacterAlphabet::Explicit(alphabet))
+                    Ok((
+                        crate::CharacterAlphabet::Explicit(alphabet),
+                        aligned_set_size,
+                    ))
                 } else {
                     Err(BytecodeConversionError::ValueMismatch(
                         "alphabet variant out of range".to_string(),
@@ -232,8 +357,11 @@ impl<B: AsRef<[u8]>> FromBytecode<B> for crate::CharacterSet {
                     .map(decode_range_alphabet)
                     .collect::<Result<Vec<_>, ()>>();
 
+                // 64-bit elements aligned on 128-bit boundaries plus a 64-bit header
+                let aligned_set_size = align_up::<16>(element_cnt * 8 + 8);
+
                 if let Ok(alphabet) = alphabet {
-                    Ok(crate::CharacterAlphabet::Ranges(alphabet))
+                    Ok((crate::CharacterAlphabet::Ranges(alphabet), aligned_set_size))
                 } else {
                     Err(BytecodeConversionError::ValueMismatch(
                         "alphabet variant out of range".to_string(),
@@ -251,7 +379,7 @@ impl<B: AsRef<[u8]>> FromBytecode<B> for crate::CharacterSet {
                     .next();
 
                 if let Some(Ok(alphabet)) = alphabet {
-                    Ok(alphabet)
+                    Ok((alphabet, 16))
                 } else {
                     Err(BytecodeConversionError::ValueMismatch(
                         "alphabet variant out of range".to_string(),
@@ -263,7 +391,10 @@ impl<B: AsRef<[u8]>> FromBytecode<B> for crate::CharacterSet {
             )),
         }?;
 
-        Ok(crate::CharacterSet::new(membership, alphabet))
+        Ok((
+            crate::CharacterSet::new(membership, alphabet),
+            consumed_bytes,
+        ))
     }
 }
 
@@ -359,6 +490,28 @@ mod tests {
     use crate::*;
 
     #[test]
+    fn should_decode_bytecode_into_expected_program() {
+        let input_output = [(
+            vec![
+                240, 240, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            ],
+            Instructions::new(vec![], vec![Opcode::Any, Opcode::Match]),
+        )];
+
+        for (test_case, (bin, expected_output)) in input_output.into_iter().enumerate() {
+            let decoded_program = crate::Instructions::from_bytecode(bin);
+
+            // assert the generated output matches the expected output
+            assert_eq!(
+                (test_case, Ok(expected_output)),
+                (test_case, decoded_program)
+            );
+        }
+    }
+
+    #[test]
     fn should_decode_bytecode_into_expected_opcode() {
         let input_output = [
             (
@@ -416,58 +569,94 @@ mod tests {
         let input_output = [
             (
                 vec![26, 26, 1, 0, 1, 0, 0, 0, 97, 0, 0, 0, 0, 0, 0, 0],
-                CharacterSet::inclusive(CharacterAlphabet::Explicit(vec!['a'])),
+                (
+                    CharacterSet::inclusive(CharacterAlphabet::Explicit(vec!['a'])),
+                    16,
+                ),
             ),
             (
                 vec![26, 26, 5, 0, 1, 0, 0, 0, 97, 0, 0, 0, 0, 0, 0, 0],
-                CharacterSet::exclusive(CharacterAlphabet::Explicit(vec!['a'])),
+                (
+                    CharacterSet::exclusive(CharacterAlphabet::Explicit(vec!['a'])),
+                    16,
+                ),
             ),
             (
                 vec![26, 26, 1, 0, 2, 0, 0, 0, 97, 0, 0, 0, 98, 0, 0, 0],
-                CharacterSet::inclusive(CharacterAlphabet::Explicit(vec!['a', 'b'])),
+                (
+                    CharacterSet::inclusive(CharacterAlphabet::Explicit(vec!['a', 'b'])),
+                    16,
+                ),
             ),
             (
                 vec![26, 26, 5, 0, 2, 0, 0, 0, 97, 0, 0, 0, 98, 0, 0, 0],
-                CharacterSet::exclusive(CharacterAlphabet::Explicit(vec!['a', 'b'])),
+                (
+                    CharacterSet::exclusive(CharacterAlphabet::Explicit(vec!['a', 'b'])),
+                    16,
+                ),
             ),
             (
                 vec![26, 26, 0, 0, 1, 0, 0, 0, 97, 0, 0, 0, 122, 0, 0, 0],
-                CharacterSet::inclusive(CharacterAlphabet::Range('a'..='z')),
+                (
+                    CharacterSet::inclusive(CharacterAlphabet::Range('a'..='z')),
+                    16,
+                ),
             ),
             (
                 vec![26, 26, 4, 0, 1, 0, 0, 0, 97, 0, 0, 0, 122, 0, 0, 0],
-                CharacterSet::exclusive(CharacterAlphabet::Range('a'..='z')),
+                (
+                    CharacterSet::exclusive(CharacterAlphabet::Range('a'..='z')),
+                    16,
+                ),
             ),
             (
                 vec![26, 26, 2, 0, 1, 0, 0, 0, 97, 0, 0, 0, 122, 0, 0, 0],
-                CharacterSet::inclusive(CharacterAlphabet::Ranges(vec!['a'..='z'])),
+                (
+                    CharacterSet::inclusive(CharacterAlphabet::Ranges(vec!['a'..='z'])),
+                    16,
+                ),
             ),
             (
                 vec![26, 26, 6, 0, 1, 0, 0, 0, 97, 0, 0, 0, 122, 0, 0, 0],
-                CharacterSet::exclusive(CharacterAlphabet::Ranges(vec!['a'..='z'])),
+                (
+                    CharacterSet::exclusive(CharacterAlphabet::Ranges(vec!['a'..='z'])),
+                    16,
+                ),
             ),
             (
                 vec![26, 26, 6, 0, 1, 0, 0, 0, 97, 0, 0, 0, 122, 0, 0, 0],
-                CharacterSet::exclusive(CharacterAlphabet::Ranges(vec!['a'..='z'])),
+                (
+                    CharacterSet::exclusive(CharacterAlphabet::Ranges(vec!['a'..='z'])),
+                    16,
+                ),
             ),
             (
                 vec![
                     26, 26, 6, 0, 2, 0, 0, 0, 97, 0, 0, 0, 122, 0, 0, 0, 65, 0, 0, 0, 90, 0, 0, 0,
                     0, 0, 0, 0, 0, 0, 0, 0,
                 ],
-                CharacterSet::exclusive(CharacterAlphabet::Ranges(vec!['a'..='z', 'A'..='Z'])),
+                (
+                    CharacterSet::exclusive(CharacterAlphabet::Ranges(vec!['a'..='z', 'A'..='Z'])),
+                    32,
+                ),
             ),
             (
                 vec![26, 26, 7, 0, 1, 0, 0, 0, 21, 0, 0, 0, 0, 0, 0, 0],
-                CharacterSet::exclusive(CharacterAlphabet::UnicodeCategory(
-                    UnicodeCategory::DecimalDigitNumber,
-                )),
+                (
+                    CharacterSet::exclusive(CharacterAlphabet::UnicodeCategory(
+                        UnicodeCategory::DecimalDigitNumber,
+                    )),
+                    16,
+                ),
             ),
             (
                 vec![26, 26, 3, 0, 1, 0, 0, 0, 21, 0, 0, 0, 0, 0, 0, 0],
-                CharacterSet::inclusive(CharacterAlphabet::UnicodeCategory(
-                    UnicodeCategory::DecimalDigitNumber,
-                )),
+                (
+                    CharacterSet::inclusive(CharacterAlphabet::UnicodeCategory(
+                        UnicodeCategory::DecimalDigitNumber,
+                    )),
+                    16,
+                ),
             ),
         ];
 

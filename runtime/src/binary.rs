@@ -95,6 +95,53 @@ fn decode_range_alphabet(data: [u8; 8]) -> Result<std::ops::RangeInclusive<char>
     Ok(lower..=upper)
 }
 
+fn decode_unicode_category_alphabet(data: [u8; 8]) -> Result<crate::UnicodeCategory, ()> {
+    let variant = u64::from_le_bytes(data);
+
+    match variant {
+        0 => Some(crate::UnicodeCategory::Letter),
+        1 => Some(crate::UnicodeCategory::LowercaseLetter),
+        2 => Some(crate::UnicodeCategory::UppercaseLetter),
+        3 => Some(crate::UnicodeCategory::TitlecaseLetter),
+        4 => Some(crate::UnicodeCategory::CasedLetter),
+        5 => Some(crate::UnicodeCategory::ModifiedLetter),
+        6 => Some(crate::UnicodeCategory::OtherLetter),
+        7 => Some(crate::UnicodeCategory::Mark),
+        8 => Some(crate::UnicodeCategory::NonSpacingMark),
+        9 => Some(crate::UnicodeCategory::SpacingCombiningMark),
+        10 => Some(crate::UnicodeCategory::EnclosingMark),
+        11 => Some(crate::UnicodeCategory::Separator),
+        12 => Some(crate::UnicodeCategory::SpaceSeparator),
+        13 => Some(crate::UnicodeCategory::LineSeparator),
+        14 => Some(crate::UnicodeCategory::ParagraphSeparator),
+        15 => Some(crate::UnicodeCategory::Symbol),
+        16 => Some(crate::UnicodeCategory::MathSymbol),
+        17 => Some(crate::UnicodeCategory::CurrencySymbol),
+        18 => Some(crate::UnicodeCategory::ModifierSymbol),
+        19 => Some(crate::UnicodeCategory::OtherSymbol),
+        20 => Some(crate::UnicodeCategory::Number),
+        21 => Some(crate::UnicodeCategory::DecimalDigitNumber),
+        22 => Some(crate::UnicodeCategory::LetterNumber),
+        23 => Some(crate::UnicodeCategory::OtherNumber),
+        24 => Some(crate::UnicodeCategory::Punctuation),
+        25 => Some(crate::UnicodeCategory::DashPunctuation),
+        26 => Some(crate::UnicodeCategory::OpenPunctuation),
+        27 => Some(crate::UnicodeCategory::ClosePunctuation),
+        28 => Some(crate::UnicodeCategory::InitialPunctuation),
+        29 => Some(crate::UnicodeCategory::FinalPunctuation),
+        30 => Some(crate::UnicodeCategory::ConnectorPunctuation),
+        31 => Some(crate::UnicodeCategory::OtherPunctuation),
+        32 => Some(crate::UnicodeCategory::Other),
+        33 => Some(crate::UnicodeCategory::Control),
+        34 => Some(crate::UnicodeCategory::Format),
+        35 => Some(crate::UnicodeCategory::PrivateUse),
+        36 => Some(crate::UnicodeCategory::Surrogate),
+        37 => Some(crate::UnicodeCategory::Unassigned),
+        _ => None,
+    }
+    .ok_or(())
+}
+
 impl<B: AsRef<[u8]>> FromBytecode<B> for crate::CharacterSet {
     type Output = Self;
     type Error = BytecodeConversionError;
@@ -193,7 +240,24 @@ impl<B: AsRef<[u8]>> FromBytecode<B> for crate::CharacterSet {
                     ))
                 }
             }
-            (CharacterAlphabetVariant::UnicodeCategory, 1) => todo!(),
+            (CharacterAlphabetVariant::UnicodeCategory, 1) => {
+                let alphabet = chunked_data
+                    .take(1)
+                    .map(|slice| TryInto::<[u8; CHUNK_SIZE]>::try_into(slice).unwrap())
+                    .map(|arr| {
+                        decode_unicode_category_alphabet(arr)
+                            .map(crate::CharacterAlphabet::UnicodeCategory)
+                    })
+                    .next();
+
+                if let Some(Ok(alphabet)) = alphabet {
+                    Ok(alphabet)
+                } else {
+                    Err(BytecodeConversionError::ValueMismatch(
+                        "alphabet variant out of range".to_string(),
+                    ))
+                }
+            }
             _ => Err(BytecodeConversionError::ValueMismatch(
                 "alphabet variant out of range".to_string(),
             )),
@@ -393,20 +457,18 @@ mod tests {
                 ],
                 CharacterSet::exclusive(CharacterAlphabet::Ranges(vec!['a'..='z', 'A'..='Z'])),
             ),
-            // unimplemented yet
-            /*
             (
-                vec![26, 26, 7, 0, 1, 0, 0, 0, 22, 0, 0, 0, 0, 0, 0, 0],
+                vec![26, 26, 7, 0, 1, 0, 0, 0, 21, 0, 0, 0, 0, 0, 0, 0],
                 CharacterSet::exclusive(CharacterAlphabet::UnicodeCategory(
                     UnicodeCategory::DecimalDigitNumber,
                 )),
             ),
             (
-                vec![26, 26, 3, 0, 1, 0, 0, 0, 22, 0, 0, 0, 0, 0, 0, 0],
+                vec![26, 26, 3, 0, 1, 0, 0, 0, 21, 0, 0, 0, 0, 0, 0, 0],
                 CharacterSet::inclusive(CharacterAlphabet::UnicodeCategory(
                     UnicodeCategory::DecimalDigitNumber,
                 )),
-            ),*/
+            ),
         ];
 
         for (test_case, (bin, expected_output)) in input_output.into_iter().enumerate() {

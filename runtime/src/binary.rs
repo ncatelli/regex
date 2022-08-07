@@ -1,21 +1,35 @@
 //! Provides utilities for deserializing a binary representation of the
 //! bytecode.
 
+/// Represents all error types that may _expectedly_ occur during
+/// deserialization.
 #[derive(Debug, PartialEq, Eq)]
 pub enum BytecodeDeserializationErrorKind {
+    /// Generic header errors, generally triggered at the initial program
+    /// header.
     InvalidHeader,
+    /// Represents fallibility of character conversions from a u32 -> char.
     CharacterEncodingError,
     IntegerConversionTo32Bit,
     IntegerConversionToUsize,
     InvalidCharacterSetHeader,
     InvalidInstructionHeader,
+    /// EpsilonCond byte exceeds the allowable range of 0-7.
     OutOfBoundsEpsilonValue,
+    /// The width of a given header segment doesn't align with the expected
+    /// value.
     ByteWidthMismatch,
+    /// The end of a header is reached prior to completed parsing.
     UnexpectedEndOfHeader,
+    /// Character alphabet byte exceeds the allowable range of 0-3.
     CharacterAlphabetVariantOutOfRange,
+    /// Fast-forward byte exceeds the allowable range of 0-2.
     FastForwardVariantOutOfRange,
 }
 
+/// Represents all error types that may _expectedly_ occur during
+/// deserialization. Including the error kind and any optional
+/// enriching data.
 #[derive(Debug, PartialEq, Eq)]
 pub struct BytecodeDeserializationError {
     /// The type of triggered error.

@@ -2,6 +2,21 @@
 //! bytecode.
 
 #[derive(Debug, PartialEq, Eq)]
+pub enum BytecodeDeserializationErrorKind {
+    InvalidHeader,
+    CharacterEncodingError,
+    IntegerConversionTo32Bit,
+    IntegerConversionToUsize,
+    InvalidCharacterSetHeader,
+    InvalidInstructionHeader,
+    OutOfBoundsEpsilonValue,
+    ByteWidthMismatch,
+    UnexpectedEndOfHeader,
+    CharacterAlphabetVariantOutOfRange,
+    FastForwardVariantOutOfRange,
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub struct BytecodeDeserializationError {
     /// The type of triggered error.
     kind: BytecodeDeserializationErrorKind,
@@ -35,6 +50,13 @@ impl std::fmt::Display for BytecodeDeserializationError {
             ("", "")
         };
         match &self.kind {
+            BytecodeDeserializationErrorKind::InvalidHeader => {
+                if self.data.is_some() {
+                    write!(f, "invalid header: {}", data)
+                } else {
+                    write!(f, "invalid header")
+                }
+            }
             BytecodeDeserializationErrorKind::CharacterEncodingError => {
                 write!(f, "unable to encode value {}{}as character", data, padding)
             }
@@ -56,23 +78,17 @@ impl std::fmt::Display for BytecodeDeserializationError {
             BytecodeDeserializationErrorKind::InvalidCharacterSetHeader => {
                 write!(f, "invalid character set header")
             }
+            BytecodeDeserializationErrorKind::InvalidInstructionHeader => {
+                write!(f, "invalid instruction header")
+            }
             BytecodeDeserializationErrorKind::CharacterAlphabetVariantOutOfRange => {
                 write!(f, "character alphabet variant out of range")
             }
+            BytecodeDeserializationErrorKind::FastForwardVariantOutOfRange => {
+                write!(f, "fast-forward variant {}{}out of range", data, padding)
+            }
         }
     }
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum BytecodeDeserializationErrorKind {
-    CharacterEncodingError,
-    IntegerConversionTo32Bit,
-    IntegerConversionToUsize,
-    InvalidCharacterSetHeader,
-    OutOfBoundsEpsilonValue,
-    ByteWidthMismatch,
-    UnexpectedEndOfHeader,
-    CharacterAlphabetVariantOutOfRange,
 }
 
 /// Represents a conversion trait from a given opcodes binary little-endian
@@ -109,7 +125,7 @@ impl TryFrom<u8> for FastForwardVariant {
 impl<B: AsRef<[u8]>> FromBytecode<B> for crate::Instructions {
     type Output = Self;
 
-    type Error = String;
+    type Error = BytecodeDeserializationError;
 
     fn from_bytecode(bin: B) -> Result<Self::Output, Self::Error> {
         const CHUNK_32BIT: usize = 4;
@@ -124,50 +140,97 @@ impl<B: AsRef<[u8]>> FromBytecode<B> for crate::Instructions {
             .take(5);
 
         let ff_variant = if let Some([0xF0, 0xF0, ff_variant, _]) = header.next() {
-            FastForwardVariant::try_from(ff_variant)
-                .map_err(|_| format!("fast-forward variant out of range: {}", ff_variant))
+            FastForwardVariant::try_from(ff_variant).map_err(|_| {
+                BytecodeDeserializationError::new(
+                    BytecodeDeserializationErrorKind::FastForwardVariantOutOfRange,
+                )
+                .with_data(ff_variant.to_string())
+            })
         } else {
-            Err("invalid header".to_string())
+            Err(BytecodeDeserializationError::new(
+                BytecodeDeserializationErrorKind::InvalidHeader,
+            ))
         }?;
 
         let set_cnt = header
             .next()
-            .ok_or_else(|| "unexpected end of header".to_string())
+            .ok_or_else(|| {
+                BytecodeDeserializationError::new(
+                    BytecodeDeserializationErrorKind::UnexpectedEndOfHeader,
+                )
+            })
             .map(u32::from_le_bytes)
-            .and_then(|val| usize::try_from(val).map_err(|e| e.to_string()))?;
+            .and_then(|val| {
+                usize::try_from(val).map_err(|_| {
+                    BytecodeDeserializationError::new(
+                        BytecodeDeserializationErrorKind::IntegerConversionToUsize,
+                    )
+                })
+            })?;
         let inst_cnt = header
             .next()
-            .ok_or_else(|| "unexpected end of header".to_string())
+            .ok_or_else(|| {
+                BytecodeDeserializationError::new(
+                    BytecodeDeserializationErrorKind::UnexpectedEndOfHeader,
+                )
+            })
             .map(u32::from_le_bytes)
-            .and_then(|val| usize::try_from(val).map_err(|e| e.to_string()))?;
+            .and_then(|val| {
+                usize::try_from(val).map_err(|_| {
+                    BytecodeDeserializationError::new(
+                        BytecodeDeserializationErrorKind::IntegerConversionToUsize,
+                    )
+                })
+            })?;
         let inst_offset = header
             .next()
-            .ok_or_else(|| "unexpected end of header".to_string())
+            .ok_or_else(|| {
+                BytecodeDeserializationError::new(
+                    BytecodeDeserializationErrorKind::UnexpectedEndOfHeader,
+                )
+            })
             .map(u32::from_le_bytes)
-            .and_then(|val| usize::try_from(val).map_err(|e| e.to_string()))?;
+            .and_then(|val| {
+                usize::try_from(val).map_err(|_| {
+                    BytecodeDeserializationError::new(
+                        BytecodeDeserializationErrorKind::IntegerConversionToUsize,
+                    )
+                    .with_data(val.to_string())
+                })
+            })?;
         let ff_value = match (ff_variant, header.next()) {
             (FastForwardVariant::None, Some(_)) => Ok(crate::FastForward::None),
             (FastForwardVariant::Char, Some(bytes)) => char::from_u32(u32::from_le_bytes(bytes))
                 .map(crate::FastForward::Char)
-                .ok_or_else(|| "unable to deserialize fast-forward char".to_string()),
+                .ok_or_else(|| {
+                    BytecodeDeserializationError::new(
+                        BytecodeDeserializationErrorKind::CharacterEncodingError,
+                    )
+                }),
             (FastForwardVariant::Set, Some(bytes)) => usize::try_from(u32::from_le_bytes(bytes))
                 .map(crate::FastForward::Set)
-                .map_err(|_| "unable to deserialize fast-forward char".to_string()),
-            (_, None) => Err("unexpected end of header".to_string()),
+                .map_err(|_| {
+                    BytecodeDeserializationError::new(
+                        BytecodeDeserializationErrorKind::CharacterEncodingError,
+                    )
+                }),
+            (_, None) => Err(BytecodeDeserializationError::new(
+                BytecodeDeserializationErrorKind::UnexpectedEndOfHeader,
+            )),
         }?;
 
         let inst_bytes_start = inst_offset;
-        let inst_bytes = bin
-            .as_ref()
-            .get(inst_bytes_start..)
-            .ok_or_else(|| "invalid instruction headers".to_string())?;
+        let inst_bytes = bin.as_ref().get(inst_bytes_start..).ok_or_else(|| {
+            BytecodeDeserializationError::new(
+                BytecodeDeserializationErrorKind::InvalidInstructionHeader,
+            )
+        })?;
 
         let insts = inst_bytes
             .chunks_exact(CHUNK_128BIT)
             .take(inst_cnt)
             .map(crate::Opcode::from_bytecode)
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
+            .collect::<Result<Vec<_>, _>>()?;
 
         let mut next_set_start = 32;
         let set_bytes_end = set_cnt * 16 + next_set_start;
@@ -176,15 +239,18 @@ impl<B: AsRef<[u8]>> FromBytecode<B> for crate::Instructions {
         let mut set_bytes = bin
             .as_ref()
             .get(next_set_start..set_bytes_end)
-            .ok_or_else(|| "invalid character set headers".to_string())?;
+            .ok_or_else(|| {
+                BytecodeDeserializationError::new(
+                    BytecodeDeserializationErrorKind::InvalidInstructionHeader,
+                )
+            })?;
         let mut sets = Vec::with_capacity(set_cnt);
 
         // loop over the character sets, reborrow the binary from each sets
         // next starting position until either the set count is hit or the end
         // of the byte slice is hit.
         while (cnt < set_cnt) && (next_set_start < set_bytes_end) {
-            let (set, bytes_consumed) =
-                crate::CharacterSet::from_bytecode(set_bytes).map_err(|e| e.to_string())?;
+            let (set, bytes_consumed) = crate::CharacterSet::from_bytecode(set_bytes)?;
 
             sets.push(set);
             cnt += 1;
@@ -192,7 +258,11 @@ impl<B: AsRef<[u8]>> FromBytecode<B> for crate::Instructions {
             set_bytes = bin
                 .as_ref()
                 .get(next_set_start..set_bytes_end)
-                .ok_or_else(|| "invalid character set headers".to_string())?;
+                .ok_or_else(|| {
+                    BytecodeDeserializationError::new(
+                        BytecodeDeserializationErrorKind::InvalidInstructionHeader,
+                    )
+                })?;
         }
 
         let program = crate::Instructions::new(sets, insts).with_fast_forward(ff_value);

@@ -2,40 +2,77 @@
 //! bytecode.
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum BytecodeConversionError {
-    CharacterEncodingError(u64),
-    IntegerConversionTo32Bit(u64),
-    IntegerConversionToUsize(u64),
-    OutOfBoundsEpsilonValue(u64),
-    ByteWidthMismatch { expected: usize, received: usize },
-    ValueMismatch(String),
+pub struct BytecodeDeserializationError {
+    /// The type of triggered error.
+    kind: BytecodeDeserializationErrorKind,
+    /// Additional error data.
+    data: Option<String>,
 }
 
-impl std::fmt::Display for BytecodeConversionError {
+impl BytecodeDeserializationError {
+    /// Instantiates a new error.
+    pub fn new(kind: BytecodeDeserializationErrorKind) -> Self {
+        Self { kind, data: None }
+    }
+
+    /// Associates additional data with the error, returning the modified error.
+    pub fn with_data(mut self, data: String) -> Self {
+        self.with_data_mut(data);
+        self
+    }
+
+    /// Associates additional data with the error.
+    pub fn with_data_mut(&mut self, data: String) {
+        self.data = Some(data);
+    }
+}
+
+impl std::fmt::Display for BytecodeDeserializationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::CharacterEncodingError(val) => {
-                write!(f, "unable to encode value {} as character", val)
+        let (data, padding) = if let Some(data) = &self.data {
+            (data.as_str(), " ")
+        } else {
+            ("", "")
+        };
+        match &self.kind {
+            BytecodeDeserializationErrorKind::CharacterEncodingError => {
+                write!(f, "unable to encode value {}{}as character", data, padding)
             }
-            Self::IntegerConversionTo32Bit(val) => {
-                write!(f, "unable to convert {} to 32-bit value", val)
+            BytecodeDeserializationErrorKind::IntegerConversionTo32Bit => {
+                write!(f, "unable to convert {}{}to 32-bit value", data, padding)
             }
-            Self::IntegerConversionToUsize(val) => {
-                write!(f, "unable to convert {} to ptr sized value", val)
+            BytecodeDeserializationErrorKind::IntegerConversionToUsize => {
+                write!(f, "unable to convert {}{}to ptr sized value", data, padding)
             }
-            Self::OutOfBoundsEpsilonValue(val) => {
-                write!(f, "epsilon condition id {} out of range", val)
+            BytecodeDeserializationErrorKind::OutOfBoundsEpsilonValue => {
+                write!(f, "epsilon condition id {}{}out of range", data, padding)
             }
-            Self::ByteWidthMismatch { expected, received } => {
-                write!(
-                    f,
-                    "byte-width mismatch, expected {}, received {}",
-                    expected, received
-                )
+            BytecodeDeserializationErrorKind::ByteWidthMismatch => {
+                write!(f, "byte-width mismatch, {}", data)
             }
-            Self::ValueMismatch(e) => write!(f, "value mismatch: {}", e),
+            BytecodeDeserializationErrorKind::UnexpectedEndOfHeader => {
+                write!(f, "unexpected end of header")
+            }
+            BytecodeDeserializationErrorKind::InvalidCharacterSetHeader => {
+                write!(f, "invalid character set header")
+            }
+            BytecodeDeserializationErrorKind::CharacterAlphabetVariantOutOfRange => {
+                write!(f, "character alphabet variant out of range")
+            }
         }
     }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum BytecodeDeserializationErrorKind {
+    CharacterEncodingError,
+    IntegerConversionTo32Bit,
+    IntegerConversionToUsize,
+    InvalidCharacterSetHeader,
+    OutOfBoundsEpsilonValue,
+    ByteWidthMismatch,
+    UnexpectedEndOfHeader,
+    CharacterAlphabetVariantOutOfRange,
 }
 
 /// Represents a conversion trait from a given opcodes binary little-endian
@@ -263,7 +300,7 @@ fn align_up<const ALIGNMENT: usize>(val: usize) -> usize {
 
 impl<B: AsRef<[u8]>> FromBytecode<B> for crate::CharacterSet {
     type Output = (Self, usize);
-    type Error = BytecodeConversionError;
+    type Error = BytecodeDeserializationError;
 
     fn from_bytecode(bin: B) -> Result<Self::Output, Self::Error> {
         const CHUNK_SIZE: usize = 8usize;
@@ -285,15 +322,16 @@ impl<B: AsRef<[u8]>> FromBytecode<B> for crate::CharacterSet {
                 let variant = CharacterAlphabetVariant::try_from((membership_and_variant) & 0b11)
                     // safe to unwrap due to `&` truncation.
                     .unwrap();
-                let entry_cnt = entry_cnt
-                    .try_into()
-                    .map(u32::from_le_bytes)
-                    .map_err(|_| BytecodeConversionError::IntegerConversionTo32Bit(0))?;
+                let entry_cnt = entry_cnt.try_into().map(u32::from_le_bytes).map_err(|_| {
+                    BytecodeDeserializationError::new(
+                        BytecodeDeserializationErrorKind::IntegerConversionTo32Bit,
+                    )
+                })?;
 
                 Ok((membership, variant, entry_cnt))
             } else {
-                Err(BytecodeConversionError::ValueMismatch(
-                    "invalid character set header".to_string(),
+                Err(BytecodeDeserializationError::new(
+                    BytecodeDeserializationErrorKind::InvalidCharacterSetHeader,
                 ))
             }?;
 
@@ -309,14 +347,18 @@ impl<B: AsRef<[u8]>> FromBytecode<B> for crate::CharacterSet {
                 if let Some(Ok(alphabet)) = alphabet {
                     Ok((alphabet, 16))
                 } else {
-                    Err(BytecodeConversionError::ValueMismatch(
-                        "alphabet variant out of range".to_string(),
+                    Err(BytecodeDeserializationError::new(
+                        BytecodeDeserializationErrorKind::CharacterAlphabetVariantOutOfRange,
                     ))
                 }
             }
             (CharacterAlphabetVariant::Explicit, cnt) => {
-                let element_cnt = usize::try_from(cnt)
-                    .map_err(|_| BytecodeConversionError::IntegerConversionToUsize(cnt.into()))?;
+                let element_cnt = usize::try_from(cnt).map_err(|_| {
+                    BytecodeDeserializationError::new(
+                        BytecodeDeserializationErrorKind::IntegerConversionToUsize,
+                    )
+                    .with_data(cnt.to_string())
+                })?;
 
                 let alphabet = chunked_data
                     // break the data into 32-bit chunks
@@ -341,14 +383,18 @@ impl<B: AsRef<[u8]>> FromBytecode<B> for crate::CharacterSet {
                         aligned_set_size,
                     ))
                 } else {
-                    Err(BytecodeConversionError::ValueMismatch(
-                        "alphabet variant out of range".to_string(),
+                    Err(BytecodeDeserializationError::new(
+                        BytecodeDeserializationErrorKind::CharacterAlphabetVariantOutOfRange,
                     ))
                 }
             }
             (CharacterAlphabetVariant::Ranges, cnt) => {
-                let element_cnt = usize::try_from(cnt)
-                    .map_err(|_| BytecodeConversionError::IntegerConversionToUsize(cnt.into()))?;
+                let element_cnt = usize::try_from(cnt).map_err(|_| {
+                    BytecodeDeserializationError::new(
+                        BytecodeDeserializationErrorKind::IntegerConversionToUsize,
+                    )
+                    .with_data(cnt.to_string())
+                })?;
 
                 let alphabet = chunked_data
                     .take(element_cnt)
@@ -363,8 +409,8 @@ impl<B: AsRef<[u8]>> FromBytecode<B> for crate::CharacterSet {
                 if let Ok(alphabet) = alphabet {
                     Ok((crate::CharacterAlphabet::Ranges(alphabet), aligned_set_size))
                 } else {
-                    Err(BytecodeConversionError::ValueMismatch(
-                        "alphabet variant out of range".to_string(),
+                    Err(BytecodeDeserializationError::new(
+                        BytecodeDeserializationErrorKind::CharacterAlphabetVariantOutOfRange,
                     ))
                 }
             }
@@ -381,13 +427,13 @@ impl<B: AsRef<[u8]>> FromBytecode<B> for crate::CharacterSet {
                 if let Some(Ok(alphabet)) = alphabet {
                     Ok((alphabet, 16))
                 } else {
-                    Err(BytecodeConversionError::ValueMismatch(
-                        "alphabet variant out of range".to_string(),
+                    Err(BytecodeDeserializationError::new(
+                        BytecodeDeserializationErrorKind::CharacterAlphabetVariantOutOfRange,
                     ))
                 }
             }
-            _ => Err(BytecodeConversionError::ValueMismatch(
-                "alphabet variant out of range".to_string(),
+            _ => Err(BytecodeDeserializationError::new(
+                BytecodeDeserializationErrorKind::CharacterAlphabetVariantOutOfRange,
             )),
         }?;
 
@@ -400,7 +446,7 @@ impl<B: AsRef<[u8]>> FromBytecode<B> for crate::CharacterSet {
 
 impl<B: AsRef<[u8]>> FromBytecode<B> for crate::Opcode {
     type Output = Self;
-    type Error = BytecodeConversionError;
+    type Error = BytecodeDeserializationError;
 
     fn from_bytecode(bin: B) -> Result<Self::Output, Self::Error> {
         use crate::*;
@@ -417,20 +463,30 @@ impl<B: AsRef<[u8]>> FromBytecode<B> for crate::Opcode {
             .map(u64::from_le_bytes);
 
         match (variant, operand) {
-            (Some(_), None) | (None, None) => Err(BytecodeConversionError::ByteWidthMismatch {
-                expected: 16,
-                received: data.len(),
-            }),
+            (Some(_), None) | (None, None) => Err(BytecodeDeserializationError::new(
+                BytecodeDeserializationErrorKind::ByteWidthMismatch,
+            )
+            .with_data(format!("expected: {}, received: {}", 16, data.len()))),
             (Some(InstAny::OPCODE_BINARY_REPR), Some(0)) => Ok(Opcode::Any),
             (Some(InstConsume::OPCODE_BINARY_REPR), Some(char_value)) => u32::try_from(char_value)
                 .ok()
                 .and_then(char::from_u32)
                 .map(|c| Opcode::Consume(InstConsume::new(c)))
-                .ok_or(BytecodeConversionError::CharacterEncodingError(char_value)),
+                .ok_or_else(|| {
+                    BytecodeDeserializationError::new(
+                        BytecodeDeserializationErrorKind::CharacterEncodingError,
+                    )
+                    .with_data(format!("{}", char_value))
+                }),
             (Some(InstConsumeSet::OPCODE_BINARY_REPR), Some(set_id)) => usize::try_from(set_id)
                 .ok()
                 .map(|set| Opcode::ConsumeSet(InstConsumeSet::new(set)))
-                .ok_or(BytecodeConversionError::IntegerConversionTo32Bit(set_id)),
+                .ok_or_else(|| {
+                    BytecodeDeserializationError::new(
+                        BytecodeDeserializationErrorKind::IntegerConversionTo32Bit,
+                    )
+                    .with_data(set_id.to_string())
+                }),
 
             (Some(InstEpsilon::OPCODE_BINARY_REPR), Some(epsilon_kind)) => {
                 let cond = match epsilon_kind {
@@ -441,7 +497,10 @@ impl<B: AsRef<[u8]>> FromBytecode<B> for crate::Opcode {
                     4 => Ok(EpsilonCond::EndOfStringOnly),
                     5 => Ok(EpsilonCond::PreviousMatchEnd),
                     6 => Ok(EpsilonCond::EndOfString),
-                    other => Err(BytecodeConversionError::OutOfBoundsEpsilonValue(other)),
+                    other => Err(BytecodeDeserializationError::new(
+                        BytecodeDeserializationErrorKind::OutOfBoundsEpsilonValue,
+                    )
+                    .with_data(other.to_string())),
                 }?;
 
                 Ok(Opcode::Epsilon(InstEpsilon::new(cond)))
@@ -468,15 +527,30 @@ impl<B: AsRef<[u8]>> FromBytecode<B> for crate::Opcode {
                 .ok()
                 .map(InstIndex::from)
                 .map(|inst_idx| Opcode::Jmp(InstJmp::new(inst_idx)))
-                .ok_or(BytecodeConversionError::IntegerConversionTo32Bit(idx)),
+                .ok_or_else(|| {
+                    BytecodeDeserializationError::new(
+                        BytecodeDeserializationErrorKind::IntegerConversionTo32Bit,
+                    )
+                    .with_data(idx.to_string())
+                }),
             (Some(InstStartSave::OPCODE_BINARY_REPR), Some(slot_id)) => usize::try_from(slot_id)
                 .ok()
                 .map(|slot| Opcode::StartSave(InstStartSave::new(slot)))
-                .ok_or(BytecodeConversionError::IntegerConversionTo32Bit(slot_id)),
+                .ok_or_else(|| {
+                    BytecodeDeserializationError::new(
+                        BytecodeDeserializationErrorKind::IntegerConversionTo32Bit,
+                    )
+                    .with_data(slot_id.to_string())
+                }),
             (Some(InstEndSave::OPCODE_BINARY_REPR), Some(slot_id)) => usize::try_from(slot_id)
                 .ok()
                 .map(|slot| Opcode::EndSave(InstEndSave::new(slot)))
-                .ok_or(BytecodeConversionError::IntegerConversionTo32Bit(slot_id)),
+                .ok_or_else(|| {
+                    BytecodeDeserializationError::new(
+                        BytecodeDeserializationErrorKind::IntegerConversionTo32Bit,
+                    )
+                    .with_data(slot_id.to_string())
+                }),
             (Some(InstMatch::OPCODE_BINARY_REPR), Some(0)) => Ok(Opcode::Match),
             (Some(_), Some(_)) => todo!(),
             _ => unreachable!(),

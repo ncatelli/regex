@@ -394,14 +394,39 @@ mod tests {
 
     #[test]
     fn should_encode_header_to_correct_bytecode_representation() {
-        let input_output = [(
-            Instructions::new(vec![], vec![Opcode::Any, Opcode::Match]),
-            vec![
-                240, 240, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            ],
-        )];
+        let input_output = [
+            // minimal functionality test.
+            (
+                Instructions::new(vec![], vec![Opcode::Any, Opcode::Match]),
+                vec![
+                    240, 240, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                ],
+            ),
+            // multiple sets and fast-forward
+            (
+                Instructions::new(
+                    vec![
+                        CharacterSet::inclusive(CharacterAlphabet::Range('a'..='z')),
+                        CharacterSet::inclusive(CharacterAlphabet::Explicit(vec!['a'])),
+                    ],
+                    vec![
+                        Opcode::Any,
+                        Opcode::ConsumeSet(InstConsumeSet::new(1)),
+                        Opcode::Match,
+                    ],
+                )
+                .with_fast_forward(FastForward::Set(0)),
+                vec![
+                    240, 240, 2, 0, 2, 0, 0, 0, 3, 0, 0, 0, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 26, 26, 0, 0, 1, 0, 0, 0, 97, 0, 0, 0, 122, 0, 0, 0, 26,
+                    26, 1, 0, 1, 0, 0, 0, 97, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                ],
+            ),
+        ];
 
         for (test_case, (char_set, expected_output)) in input_output.into_iter().enumerate() {
             let generated_bytecode = char_set.to_bytecode();

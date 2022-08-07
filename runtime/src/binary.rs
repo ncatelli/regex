@@ -133,7 +133,7 @@ impl<B: AsRef<[u8]>> FromBytecode<B> for crate::Instructions {
             .map_err(|e| e.to_string())?;
 
         let mut next_set_start = 32;
-        let set_bytes_end = set_cnt * 128 + next_set_start;
+        let set_bytes_end = set_cnt * 16 + next_set_start;
 
         let mut cnt = 0;
         let mut set_bytes = bin
@@ -491,14 +491,38 @@ mod tests {
 
     #[test]
     fn should_decode_bytecode_into_expected_program() {
-        let input_output = [(
-            vec![
-                240, 240, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            ],
-            Instructions::new(vec![], vec![Opcode::Any, Opcode::Match]),
-        )];
+        let input_output = [
+            (
+                vec![
+                    240, 240, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                ],
+                Instructions::new(vec![], vec![Opcode::Any, Opcode::Match]),
+            ),
+            // decode to multiple sets and fast-forward
+            (
+                vec![
+                    240, 240, 2, 0, 2, 0, 0, 0, 3, 0, 0, 0, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 26, 26, 0, 0, 1, 0, 0, 0, 97, 0, 0, 0, 122, 0, 0, 0, 26,
+                    26, 1, 0, 1, 0, 0, 0, 97, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                ],
+                Instructions::new(
+                    vec![
+                        CharacterSet::inclusive(CharacterAlphabet::Range('a'..='z')),
+                        CharacterSet::inclusive(CharacterAlphabet::Explicit(vec!['a'])),
+                    ],
+                    vec![
+                        Opcode::Any,
+                        Opcode::ConsumeSet(InstConsumeSet::new(1)),
+                        Opcode::Match,
+                    ],
+                )
+                .with_fast_forward(FastForward::Set(0)),
+            ),
+        ];
 
         for (test_case, (bin, expected_output)) in input_output.into_iter().enumerate() {
             let decoded_program = crate::Instructions::from_bytecode(bin);

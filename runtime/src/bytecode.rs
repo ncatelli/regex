@@ -1,6 +1,32 @@
 //! Provides utilities for deserializing a binary representation of the
 //! bytecode.
 
+/// Attempts to convert a binary representation of the instruction set into its
+/// corresponding internal representation.
+///
+/// # Example
+/// ```
+/// use regex_runtime::{Opcode, Instructions, bytecode::FromBytecode};
+///
+/// let bin = vec![
+///     240, 240, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+///     0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0,
+///     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+/// ];
+/// let expected_output = Instructions::new(vec![], vec![Opcode::Any, Opcode::Match]);
+/// let decoded_program = Instructions::from_bytecode(bin);
+///
+/// assert_eq!(
+///     Ok(expected_output),
+///     decoded_program
+/// );
+/// ```
+pub fn from_bytecode<B: AsRef<[u8]>>(
+    bin: B,
+) -> Result<crate::Instructions, BytecodeDeserializationError> {
+    crate::Instructions::from_bytecode(bin)
+}
+
 /// Represents all error types that may _expectedly_ occur during
 /// deserialization.
 #[derive(Debug, PartialEq, Eq)]
@@ -644,7 +670,7 @@ impl<B: AsRef<[u8]>> FromBytecode<B> for crate::Opcode {
 
 #[cfg(test)]
 mod tests {
-    use crate::binary::FromBytecode;
+    use crate::bytecode::FromBytecode;
     use crate::*;
 
     #[test]

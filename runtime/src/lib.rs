@@ -37,6 +37,9 @@
 use collections_ext::set::sparse::SparseSet;
 use std::fmt::{Debug, Display};
 
+pub mod bytecode;
+pub use bytecode::from_binary;
+
 /// Represents a defined match group for a pattern.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SaveGroupSlot {
@@ -593,6 +596,11 @@ pub struct CharacterSet {
 
 impl CharacterSet {
     pub const MAGIC_NUMBER: u16 = 0x1A1A;
+
+    /// Instantiates a character set from its consituent parts.
+    pub fn new(membership: SetMembership, set: CharacterAlphabet) -> Self {
+        Self { membership, set }
+    }
 
     /// Instantiates an inclusive character set from a passed alphabet.
     pub fn inclusive(set: CharacterAlphabet) -> Self {

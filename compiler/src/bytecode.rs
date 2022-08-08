@@ -9,7 +9,7 @@ use regex_runtime::*;
 /// # Example
 ///
 /// ```
-/// use regex_compiler::bytecode::ToBytecode;
+/// use regex_compiler::to_binary;
 /// use regex_runtime::{Instructions, Opcode};
 ///
 /// let input = Instructions::new(vec![], vec![Opcode::Any, Opcode::Match]);
@@ -20,13 +20,13 @@ use regex_runtime::*;
 /// ];
 ///
 ///
-/// let generated_bytecode = input.to_bytecode();
+/// let generated_bytecode = to_binary(&input);
 /// assert_eq!(
-///     expected_output,
+///     Ok(expected_output),
 ///     generated_bytecode
 /// );
 /// ```
-pub fn to_binary(insts: Instructions) -> Result<Vec<u8>, String> {
+pub fn to_binary(insts: &Instructions) -> Result<Vec<u8>, String> {
     Ok(insts.to_bytecode())
 }
 
@@ -255,32 +255,32 @@ impl ToBytecode for CharacterAlphabet {
                     UnicodeCategory::SpacingCombiningMark => 9u32,
                     UnicodeCategory::EnclosingMark => 10u32,
                     UnicodeCategory::Separator => 11u32,
-                    UnicodeCategory::SpaceSeparator => 13u32,
-                    UnicodeCategory::LineSeparator => 14u32,
-                    UnicodeCategory::ParagraphSeparator => 15u32,
-                    UnicodeCategory::Symbol => 16u32,
-                    UnicodeCategory::MathSymbol => 17u32,
-                    UnicodeCategory::CurrencySymbol => 18u32,
-                    UnicodeCategory::ModifierSymbol => 19u32,
-                    UnicodeCategory::OtherSymbol => 20u32,
-                    UnicodeCategory::Number => 21u32,
-                    UnicodeCategory::DecimalDigitNumber => 22u32,
-                    UnicodeCategory::LetterNumber => 23u32,
-                    UnicodeCategory::OtherNumber => 24u32,
-                    UnicodeCategory::Punctuation => 25u32,
-                    UnicodeCategory::DashPunctuation => 26u32,
-                    UnicodeCategory::OpenPunctuation => 27u32,
-                    UnicodeCategory::ClosePunctuation => 28u32,
-                    UnicodeCategory::InitialPunctuation => 29u32,
-                    UnicodeCategory::FinalPunctuation => 30u32,
-                    UnicodeCategory::ConnectorPunctuation => 31u32,
-                    UnicodeCategory::OtherPunctuation => 32u32,
-                    UnicodeCategory::Other => 33u32,
-                    UnicodeCategory::Control => 34u32,
-                    UnicodeCategory::Format => 35u32,
-                    UnicodeCategory::PrivateUse => 36u32,
-                    UnicodeCategory::Surrogate => 37u32,
-                    UnicodeCategory::Unassigned => 38u32,
+                    UnicodeCategory::SpaceSeparator => 12u32,
+                    UnicodeCategory::LineSeparator => 13u32,
+                    UnicodeCategory::ParagraphSeparator => 14u32,
+                    UnicodeCategory::Symbol => 15u32,
+                    UnicodeCategory::MathSymbol => 16u32,
+                    UnicodeCategory::CurrencySymbol => 17u32,
+                    UnicodeCategory::ModifierSymbol => 18u32,
+                    UnicodeCategory::OtherSymbol => 19u32,
+                    UnicodeCategory::Number => 20u32,
+                    UnicodeCategory::DecimalDigitNumber => 21u32,
+                    UnicodeCategory::LetterNumber => 22u32,
+                    UnicodeCategory::OtherNumber => 23u32,
+                    UnicodeCategory::Punctuation => 24u32,
+                    UnicodeCategory::DashPunctuation => 25u32,
+                    UnicodeCategory::OpenPunctuation => 26u32,
+                    UnicodeCategory::ClosePunctuation => 27u32,
+                    UnicodeCategory::InitialPunctuation => 28u32,
+                    UnicodeCategory::FinalPunctuation => 29u32,
+                    UnicodeCategory::ConnectorPunctuation => 30u32,
+                    UnicodeCategory::OtherPunctuation => 31u32,
+                    UnicodeCategory::Other => 32u32,
+                    UnicodeCategory::Control => 33u32,
+                    UnicodeCategory::Format => 34u32,
+                    UnicodeCategory::PrivateUse => 35u32,
+                    UnicodeCategory::Surrogate => 36u32,
+                    UnicodeCategory::Unassigned => 37u32,
                 }
                 .to_le_bytes();
 
@@ -394,14 +394,39 @@ mod tests {
 
     #[test]
     fn should_encode_header_to_correct_bytecode_representation() {
-        let input_output = [(
-            Instructions::new(vec![], vec![Opcode::Any, Opcode::Match]),
-            vec![
-                240, 240, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            ],
-        )];
+        let input_output = [
+            // minimal functionality test.
+            (
+                Instructions::new(vec![], vec![Opcode::Any, Opcode::Match]),
+                vec![
+                    240, 240, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                ],
+            ),
+            // multiple sets and fast-forward
+            (
+                Instructions::new(
+                    vec![
+                        CharacterSet::inclusive(CharacterAlphabet::Range('a'..='z')),
+                        CharacterSet::inclusive(CharacterAlphabet::Explicit(vec!['a'])),
+                    ],
+                    vec![
+                        Opcode::Any,
+                        Opcode::ConsumeSet(InstConsumeSet::new(1)),
+                        Opcode::Match,
+                    ],
+                )
+                .with_fast_forward(FastForward::Set(0)),
+                vec![
+                    240, 240, 2, 0, 2, 0, 0, 0, 3, 0, 0, 0, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 26, 26, 0, 0, 1, 0, 0, 0, 97, 0, 0, 0, 122, 0, 0, 0, 26,
+                    26, 1, 0, 1, 0, 0, 0, 97, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                ],
+            ),
+        ];
 
         for (test_case, (char_set, expected_output)) in input_output.into_iter().enumerate() {
             let generated_bytecode = char_set.to_bytecode();
@@ -427,6 +452,14 @@ mod tests {
             (
                 CharacterSet::exclusive(CharacterAlphabet::Explicit(vec!['a'])),
                 vec![26, 26, 5, 0, 1, 0, 0, 0, 97, 0, 0, 0, 0, 0, 0, 0],
+            ),
+            (
+                CharacterSet::inclusive(CharacterAlphabet::Explicit(vec!['a', 'b'])),
+                vec![26, 26, 1, 0, 2, 0, 0, 0, 97, 0, 0, 0, 98, 0, 0, 0],
+            ),
+            (
+                CharacterSet::exclusive(CharacterAlphabet::Explicit(vec!['a', 'b'])),
+                vec![26, 26, 5, 0, 2, 0, 0, 0, 97, 0, 0, 0, 98, 0, 0, 0],
             ),
             (
                 CharacterSet::inclusive(CharacterAlphabet::Range('a'..='z')),
@@ -459,13 +492,13 @@ mod tests {
                 CharacterSet::exclusive(CharacterAlphabet::UnicodeCategory(
                     UnicodeCategory::DecimalDigitNumber,
                 )),
-                vec![26, 26, 7, 0, 1, 0, 0, 0, 22, 0, 0, 0, 0, 0, 0, 0],
+                vec![26, 26, 7, 0, 1, 0, 0, 0, 21, 0, 0, 0, 0, 0, 0, 0],
             ),
             (
                 CharacterSet::inclusive(CharacterAlphabet::UnicodeCategory(
                     UnicodeCategory::DecimalDigitNumber,
                 )),
-                vec![26, 26, 3, 0, 1, 0, 0, 0, 22, 0, 0, 0, 0, 0, 0, 0],
+                vec![26, 26, 3, 0, 1, 0, 0, 0, 21, 0, 0, 0, 0, 0, 0, 0],
             ),
         ];
 

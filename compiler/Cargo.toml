@@ -13,6 +13,11 @@ name = "linear_scaling_of_input"
 path = "benches/linear.rs"
 harness = false
 
+[[bench]]
+name = "binary_serialization"
+path = "benches/serialization.rs"
+harness = false
+
 [dependencies]
 parcel = { git = "https://github.com/ncatelli/parcel", tag = "v2.0.1" }
 regex-runtime = { path = "../runtime/" }

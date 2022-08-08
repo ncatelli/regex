@@ -1,6 +1,6 @@
 [package]
 name = "regex-runtime"
-version = "0.1.0"
+version = "0.2.0"
 license = "Apache-2.0"
 edition = "2021"
 workspace = ".."
@@ -11,6 +11,11 @@ criterion = "0.3"
 [[bench]]
 name = "linear_scaling_of_input"
 path = "benches/linear.rs"
+harness = false
+
+[[bench]]
+name = "binary_deserialization"
+path = "benches/deserialization.rs"
 harness = false
 
 [dependencies]

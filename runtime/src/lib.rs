@@ -38,6 +38,7 @@ use collections_ext::set::sparse::SparseSet;
 use std::fmt::{Debug, Display};
 
 pub mod bytecode;
+pub use bytecode::from_binary;
 
 /// Represents a defined match group for a pattern.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

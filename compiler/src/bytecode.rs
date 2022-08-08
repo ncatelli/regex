@@ -9,7 +9,7 @@ use regex_runtime::*;
 /// # Example
 ///
 /// ```
-/// use regex_compiler::bytecode::ToBytecode;
+/// use regex_compiler::to_binary;
 /// use regex_runtime::{Instructions, Opcode};
 ///
 /// let input = Instructions::new(vec![], vec![Opcode::Any, Opcode::Match]);
@@ -20,13 +20,13 @@ use regex_runtime::*;
 /// ];
 ///
 ///
-/// let generated_bytecode = input.to_bytecode();
+/// let generated_bytecode = to_binary(&input);
 /// assert_eq!(
-///     expected_output,
+///     Ok(expected_output),
 ///     generated_bytecode
 /// );
 /// ```
-pub fn to_binary(insts: Instructions) -> Result<Vec<u8>, String> {
+pub fn to_binary(insts: &Instructions) -> Result<Vec<u8>, String> {
     Ok(insts.to_bytecode())
 }
 

@@ -21,7 +21,7 @@
 ///     decoded_program
 /// );
 /// ```
-pub fn from_bytecode<B: AsRef<[u8]>>(
+pub fn from_binary<B: AsRef<[u8]>>(
     bin: B,
 ) -> Result<crate::Instructions, BytecodeDeserializationError> {
     crate::Instructions::from_bytecode(bin)

@@ -198,9 +198,16 @@ pub fn compile(regex_ast: ast::Regex) -> Result<Instructions, String> {
                 (false, Some(Opcode::Consume(InstConsume { value }))) => {
                     Instructions::new(sets, insts).with_fast_forward(FastForward::Char(value))
                 }
-                (false, Some(Opcode::ConsumeSet(InstConsumeSet { idx }))) => {
-                    Instructions::new(sets, insts).with_fast_forward(FastForward::Set(idx))
-                }
+                (false, Some(Opcode::ConsumeSet(InstConsumeSet { idx }))) => match sets.get(idx) {
+                    Some(CharacterSet {
+                        set: CharacterAlphabet::Explicit(_),
+                        ..
+                    }) => Instructions::new(sets, insts),
+                    Some(_) => {
+                        Instructions::new(sets, insts).with_fast_forward(FastForward::Set(idx))
+                    }
+                    None => todo!(),
+                },
                 (
                     false,
                     Some(Opcode::Epsilon(InstEpsilon {

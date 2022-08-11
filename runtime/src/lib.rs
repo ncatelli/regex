@@ -2298,4 +2298,33 @@ mod tests {
         let res = run::<1>(&prog, input);
         assert_eq!(Some(expected_res), res)
     }
+
+    #[test]
+    fn should_match_explicit_char_set_middle() {
+        // [124]
+        let prog = Instructions::default()
+            .with_sets(vec![
+                CharacterSet::inclusive(CharacterAlphabet::Explicit(vec!['1'])),
+                CharacterSet::inclusive(CharacterAlphabet::Explicit(vec!['2'])),
+                CharacterSet::inclusive(CharacterAlphabet::Explicit(vec!['4'])),
+            ])
+            .with_opcodes(vec![
+                Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
+                Opcode::Any,
+                Opcode::Jmp(InstJmp::new(InstIndex::from(0))),
+                Opcode::Split(InstSplit::new(InstIndex::from(4), InstIndex::from(6))),
+                Opcode::ConsumeSet(InstConsumeSet::member_of(0)),
+                Opcode::Jmp(InstJmp::new(InstIndex::from(10))),
+                Opcode::Split(InstSplit::new(InstIndex::from(7), InstIndex::from(9))),
+                Opcode::ConsumeSet(InstConsumeSet::member_of(1)),
+                Opcode::Jmp(InstJmp::new(InstIndex::from(10))),
+                Opcode::ConsumeSet(InstConsumeSet::member_of(2)),
+                Opcode::Match,
+            ]);
+
+        let input = "2";
+
+        let res = run::<0>(&prog, input);
+        assert!(res.is_some())
+    }
 }

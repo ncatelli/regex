@@ -1453,10 +1453,8 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
 
                 Some(Opcode::Consume(InstConsume { value })) if Some(*value) == next_char => {
                     let mut thread_local_save_group = thread_save_groups;
-                    for thr in thread_local_save_group
-                        .iter_mut()
-                        .filter(|t| t.is_allocated())
-                    {
+
+                    for thr in thread_local_save_group.iter_mut() {
                         if let SaveGroup::Allocated { slot_id } = thr {
                             *thr = SaveGroup::open(*slot_id, input_idx);
                         }
@@ -1478,10 +1476,7 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
                     }) =>
                 {
                     let mut thread_local_save_group = thread_save_groups;
-                    for thr in thread_local_save_group
-                        .iter_mut()
-                        .filter(|t| t.is_allocated())
-                    {
+                    for thr in thread_local_save_group.iter_mut() {
                         if let SaveGroup::Allocated { slot_id } = thr {
                             *thr = SaveGroup::open(*slot_id, input_idx);
                         }
@@ -2297,5 +2292,34 @@ mod tests {
 
         let res = run::<1>(&prog, input);
         assert_eq!(Some(expected_res), res)
+    }
+
+    #[test]
+    fn should_match_explicit_char_set_middle() {
+        // [124]
+        let prog = Instructions::default()
+            .with_sets(vec![
+                CharacterSet::inclusive(CharacterAlphabet::Explicit(vec!['1'])),
+                CharacterSet::inclusive(CharacterAlphabet::Explicit(vec!['2'])),
+                CharacterSet::inclusive(CharacterAlphabet::Explicit(vec!['4'])),
+            ])
+            .with_opcodes(vec![
+                Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
+                Opcode::Any,
+                Opcode::Jmp(InstJmp::new(InstIndex::from(0))),
+                Opcode::Split(InstSplit::new(InstIndex::from(4), InstIndex::from(6))),
+                Opcode::ConsumeSet(InstConsumeSet::member_of(0)),
+                Opcode::Jmp(InstJmp::new(InstIndex::from(10))),
+                Opcode::Split(InstSplit::new(InstIndex::from(7), InstIndex::from(9))),
+                Opcode::ConsumeSet(InstConsumeSet::member_of(1)),
+                Opcode::Jmp(InstJmp::new(InstIndex::from(10))),
+                Opcode::ConsumeSet(InstConsumeSet::member_of(2)),
+                Opcode::Match,
+            ]);
+
+        let input = "2";
+
+        let res = run::<0>(&prog, input);
+        assert!(res.is_some())
     }
 }

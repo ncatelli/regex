@@ -1453,10 +1453,8 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
 
                 Some(Opcode::Consume(InstConsume { value })) if Some(*value) == next_char => {
                     let mut thread_local_save_group = thread_save_groups;
-                    for thr in thread_local_save_group
-                        .iter_mut()
-                        .filter(|t| t.is_allocated())
-                    {
+
+                    for thr in thread_local_save_group.iter_mut() {
                         if let SaveGroup::Allocated { slot_id } = thr {
                             *thr = SaveGroup::open(*slot_id, input_idx);
                         }
@@ -1478,10 +1476,7 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
                     }) =>
                 {
                     let mut thread_local_save_group = thread_save_groups;
-                    for thr in thread_local_save_group
-                        .iter_mut()
-                        .filter(|t| t.is_allocated())
-                    {
+                    for thr in thread_local_save_group.iter_mut() {
                         if let SaveGroup::Allocated { slot_id } = thr {
                             *thr = SaveGroup::open(*slot_id, input_idx);
                         }

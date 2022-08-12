@@ -198,16 +198,12 @@ pub fn compile(regex_ast: ast::Regex) -> Result<Instructions, String> {
                 (false, Some(Opcode::Consume(InstConsume { value }))) => {
                     Instructions::new(sets, insts).with_fast_forward(FastForward::Char(value))
                 }
-                (false, Some(Opcode::ConsumeSet(InstConsumeSet { idx }))) => match sets.get(idx) {
-                    Some(CharacterSet {
-                        set: CharacterAlphabet::Explicit(_),
-                        ..
-                    }) => Instructions::new(sets, insts),
-                    Some(_) => {
-                        Instructions::new(sets, insts).with_fast_forward(FastForward::Set(idx))
-                    }
-                    None => todo!(),
-                },
+                (false, Some(Opcode::ConsumeSet(InstConsumeSet { idx }))) => {
+                    // panics if the set is undefined.
+                    // This should never happend
+                    let _ = sets.get(idx).unwrap();
+                    Instructions::new(sets, insts).with_fast_forward(FastForward::Set(idx))
+                }
                 (
                     false,
                     Some(Opcode::Epsilon(InstEpsilon {
@@ -599,9 +595,37 @@ fn character_group(cg: ast::CharacterGroup) -> Result<RelativeOpcodes, String> {
         ast::CharacterGroup::Items(cgis) => (false, cgis),
     };
 
-    let sets: Vec<RelativeOpcodes> = items
+    let item_cnt = items.len();
+
+    // fold all explicit character alphabets into a single alphabet.
+    let (explicit, other_alphabets) = items
         .into_iter()
         .map(character_group_item_to_alphabet)
+        .fold(
+            (Vec::with_capacity(item_cnt), Vec::with_capacity(item_cnt)),
+            |(mut chars, mut other), x| {
+                match x {
+                    ca @ CharacterAlphabet::Range(_)
+                    | ca @ CharacterAlphabet::Ranges(_)
+                    | ca @ CharacterAlphabet::UnicodeCategory(_) => other.push(ca),
+                    CharacterAlphabet::Explicit(mut c) => chars.append(&mut c),
+                };
+
+                (chars, other)
+            },
+        );
+
+    let explicit_alphabet = if explicit.is_empty() {
+        vec![]
+    } else {
+        vec![CharacterAlphabet::Explicit(explicit)]
+    };
+
+    // construct a set from the alphabet
+    let sets: Vec<RelativeOpcodes> = explicit_alphabet
+        .into_iter()
+        .chain(other_alphabets)
+        .into_iter()
         .map(|alphabet| {
             if negated {
                 CharacterSet::exclusive(alphabet)
@@ -1478,19 +1502,11 @@ mod tests {
 
         assert_eq!(
             Ok(Instructions::default()
-                .with_sets(vec![
-                    CharacterSet::inclusive(CharacterAlphabet::Explicit(vec!['a'])),
-                    CharacterSet::inclusive(CharacterAlphabet::Explicit(vec!['b'])),
-                    CharacterSet::inclusive(CharacterAlphabet::Explicit(vec!['z']))
-                ])
+                .with_sets(vec![CharacterSet::inclusive(CharacterAlphabet::Explicit(
+                    vec!['a', 'b', 'z']
+                )),])
                 .with_opcodes(vec![
-                    Opcode::Split(InstSplit::new(InstIndex::from(1), InstIndex::from(3))),
                     Opcode::ConsumeSet(InstConsumeSet::member_of(0)),
-                    Opcode::Jmp(InstJmp::new(InstIndex::from(7))),
-                    Opcode::Split(InstSplit::new(InstIndex::from(4), InstIndex::from(6))),
-                    Opcode::ConsumeSet(InstConsumeSet::member_of(1)),
-                    Opcode::Jmp(InstJmp::new(InstIndex::from(7))),
-                    Opcode::ConsumeSet(InstConsumeSet::member_of(2)),
                     Opcode::Match,
                 ])),
             compile(regex_ast)

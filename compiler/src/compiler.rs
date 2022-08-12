@@ -204,14 +204,8 @@ pub fn compile(regex_ast: ast::Regex) -> Result<Instructions, String> {
                     let _ = sets.get(idx).unwrap();
                     Instructions::new(sets, insts).with_fast_forward(FastForward::Set(idx))
                 }
-                (
-                    false,
-                    Some(Opcode::Epsilon(InstEpsilon {
-                        cond: EpsilonCond::WordBoundary,
-                    })),
-                ) => Instructions::new(sets, insts),
                 // catch-all
-                (false, None) | (false, Some(_)) | (true, _) => Instructions::new(sets, insts),
+                _ => Instructions::new(sets, insts),
             }
         })
 }

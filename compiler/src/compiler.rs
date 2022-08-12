@@ -593,7 +593,7 @@ fn character_group(cg: ast::CharacterGroup) -> Result<RelativeOpcodes, String> {
     let item_cnt = items.len();
 
     // fold all explicit character alphabets into a single alphabet.
-    let (explicit, other_alphabets) = items
+    let (mut explicit, other_alphabets) = items
         .into_iter()
         .map(character_group_item_to_alphabet)
         .fold(
@@ -613,6 +613,8 @@ fn character_group(cg: ast::CharacterGroup) -> Result<RelativeOpcodes, String> {
     let explicit_alphabet = if explicit.is_empty() {
         vec![]
     } else {
+        // deduplicate characters to save traversal time.
+        explicit.dedup();
         vec![CharacterAlphabet::Explicit(explicit)]
     };
 
@@ -1482,13 +1484,49 @@ mod tests {
 
     #[test]
     fn should_compile_compound_character_group() {
-        // approximate to `^[abz]`
-        let regex_ast = Regex::StartOfStringAnchored(Expression(vec![SubExpression(vec![
+        // approximate to `[abz]`
+        let regex_ast = Regex::Unanchored(Expression(vec![SubExpression(vec![
             SubExpressionItem::Match(Match::WithoutQuantifier {
                 item: MatchItem::MatchCharacterClass(MatchCharacterClass::CharacterGroup(
                     CharacterGroup::Items(vec![
                         CharacterGroupItem::Char(Char('a')),
                         CharacterGroupItem::Char(Char('b')),
+                        CharacterGroupItem::Char(Char('z')),
+                    ]),
+                )),
+            }),
+        ])]));
+
+        let expected = Ok(Instructions::default()
+            .with_sets(vec![CharacterSet::inclusive(CharacterAlphabet::Explicit(
+                vec!['a', 'b', 'z'],
+            ))])
+            .with_opcodes(vec![
+                Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
+                Opcode::Any,
+                Opcode::Jmp(InstJmp::new(InstIndex::from(0))),
+                Opcode::ConsumeSet(InstConsumeSet::member_of(0)),
+                Opcode::Match,
+            ])
+            .with_fast_forward(FastForward::Set(0)));
+
+        assert_eq!(expected, compile(regex_ast));
+    }
+
+    #[test]
+    fn should_dedup_explicit_character_groups() {
+        // approximate to `^[aabbzzzz]`
+        let regex_ast = Regex::StartOfStringAnchored(Expression(vec![SubExpression(vec![
+            SubExpressionItem::Match(Match::WithoutQuantifier {
+                item: MatchItem::MatchCharacterClass(MatchCharacterClass::CharacterGroup(
+                    CharacterGroup::Items(vec![
+                        CharacterGroupItem::Char(Char('a')),
+                        CharacterGroupItem::Char(Char('a')),
+                        CharacterGroupItem::Char(Char('b')),
+                        CharacterGroupItem::Char(Char('b')),
+                        CharacterGroupItem::Char(Char('z')),
+                        CharacterGroupItem::Char(Char('z')),
+                        CharacterGroupItem::Char(Char('z')),
                         CharacterGroupItem::Char(Char('z')),
                     ]),
                 )),

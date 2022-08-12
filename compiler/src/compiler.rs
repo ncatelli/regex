@@ -198,24 +198,15 @@ pub fn compile(regex_ast: ast::Regex) -> Result<Instructions, String> {
                 (false, Some(Opcode::Consume(InstConsume { value }))) => {
                     Instructions::new(sets, insts).with_fast_forward(FastForward::Char(value))
                 }
-                (false, Some(Opcode::ConsumeSet(InstConsumeSet { idx }))) => match sets.get(idx) {
-                    Some(CharacterSet {
-                        set: CharacterAlphabet::Explicit(_),
-                        ..
-                    }) => Instructions::new(sets, insts),
-                    Some(_) => {
-                        Instructions::new(sets, insts).with_fast_forward(FastForward::Set(idx))
-                    }
-                    None => todo!(),
-                },
-                (
-                    false,
-                    Some(Opcode::Epsilon(InstEpsilon {
-                        cond: EpsilonCond::WordBoundary,
-                    })),
-                ) => Instructions::new(sets, insts),
-                // catch-all
-                (false, None) | (false, Some(_)) | (true, _) => Instructions::new(sets, insts),
+                (false, Some(Opcode::ConsumeSet(InstConsumeSet { idx }))) => {
+                    // panics if the set is undefined.
+                    // This should never happen.
+                    let _ = sets.get(idx).unwrap();
+                    Instructions::new(sets, insts).with_fast_forward(FastForward::Set(idx))
+                }
+                // This disables fast-forward for all other cases whcih
+                // primarily should be either an anchored or empty program.
+                _ => Instructions::new(sets, insts),
             }
         })
 }
@@ -599,9 +590,39 @@ fn character_group(cg: ast::CharacterGroup) -> Result<RelativeOpcodes, String> {
         ast::CharacterGroup::Items(cgis) => (false, cgis),
     };
 
-    let sets: Vec<RelativeOpcodes> = items
+    let item_cnt = items.len();
+
+    // fold all explicit character alphabets into a single alphabet.
+    let (mut explicit, other_alphabets) = items
         .into_iter()
         .map(character_group_item_to_alphabet)
+        .fold(
+            (Vec::with_capacity(item_cnt), Vec::with_capacity(item_cnt)),
+            |(mut chars, mut other), x| {
+                match x {
+                    ca @ CharacterAlphabet::Range(_)
+                    | ca @ CharacterAlphabet::Ranges(_)
+                    | ca @ CharacterAlphabet::UnicodeCategory(_) => other.push(ca),
+                    CharacterAlphabet::Explicit(mut c) => chars.append(&mut c),
+                };
+
+                (chars, other)
+            },
+        );
+
+    let explicit_alphabet = if explicit.is_empty() {
+        vec![]
+    } else {
+        // deduplicate characters to save traversal time.
+        explicit.dedup();
+        vec![CharacterAlphabet::Explicit(explicit)]
+    };
+
+    // construct a set from the alphabet
+    let sets: Vec<RelativeOpcodes> = explicit_alphabet
+        .into_iter()
+        .chain(other_alphabets)
+        .into_iter()
         .map(|alphabet| {
             if negated {
                 CharacterSet::exclusive(alphabet)
@@ -1463,8 +1484,8 @@ mod tests {
 
     #[test]
     fn should_compile_compound_character_group() {
-        // approximate to `^[abz]`
-        let regex_ast = Regex::StartOfStringAnchored(Expression(vec![SubExpression(vec![
+        // approximate to `[abz]`
+        let regex_ast = Regex::Unanchored(Expression(vec![SubExpression(vec![
             SubExpressionItem::Match(Match::WithoutQuantifier {
                 item: MatchItem::MatchCharacterClass(MatchCharacterClass::CharacterGroup(
                     CharacterGroup::Items(vec![
@@ -1476,21 +1497,49 @@ mod tests {
             }),
         ])]));
 
+        let expected = Ok(Instructions::default()
+            .with_sets(vec![CharacterSet::inclusive(CharacterAlphabet::Explicit(
+                vec!['a', 'b', 'z'],
+            ))])
+            .with_opcodes(vec![
+                Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
+                Opcode::Any,
+                Opcode::Jmp(InstJmp::new(InstIndex::from(0))),
+                Opcode::ConsumeSet(InstConsumeSet::member_of(0)),
+                Opcode::Match,
+            ])
+            .with_fast_forward(FastForward::Set(0)));
+
+        assert_eq!(expected, compile(regex_ast));
+    }
+
+    #[test]
+    fn should_dedup_explicit_character_groups() {
+        // approximate to `^[aabbzzzz]`
+        let regex_ast = Regex::StartOfStringAnchored(Expression(vec![SubExpression(vec![
+            SubExpressionItem::Match(Match::WithoutQuantifier {
+                item: MatchItem::MatchCharacterClass(MatchCharacterClass::CharacterGroup(
+                    CharacterGroup::Items(vec![
+                        CharacterGroupItem::Char(Char('a')),
+                        CharacterGroupItem::Char(Char('a')),
+                        CharacterGroupItem::Char(Char('b')),
+                        CharacterGroupItem::Char(Char('b')),
+                        CharacterGroupItem::Char(Char('z')),
+                        CharacterGroupItem::Char(Char('z')),
+                        CharacterGroupItem::Char(Char('z')),
+                        CharacterGroupItem::Char(Char('z')),
+                    ]),
+                )),
+            }),
+        ])]));
+
         assert_eq!(
             Ok(Instructions::default()
-                .with_sets(vec![
-                    CharacterSet::inclusive(CharacterAlphabet::Explicit(vec!['a'])),
-                    CharacterSet::inclusive(CharacterAlphabet::Explicit(vec!['b'])),
-                    CharacterSet::inclusive(CharacterAlphabet::Explicit(vec!['z']))
-                ])
+                .with_sets(vec![CharacterSet::inclusive(CharacterAlphabet::Explicit(
+                    vec!['a', 'b', 'z']
+                )),])
                 .with_opcodes(vec![
-                    Opcode::Split(InstSplit::new(InstIndex::from(1), InstIndex::from(3))),
                     Opcode::ConsumeSet(InstConsumeSet::member_of(0)),
-                    Opcode::Jmp(InstJmp::new(InstIndex::from(7))),
-                    Opcode::Split(InstSplit::new(InstIndex::from(4), InstIndex::from(6))),
-                    Opcode::ConsumeSet(InstConsumeSet::member_of(1)),
-                    Opcode::Jmp(InstJmp::new(InstIndex::from(7))),
-                    Opcode::ConsumeSet(InstConsumeSet::member_of(2)),
                     Opcode::Match,
                 ])),
             compile(regex_ast)

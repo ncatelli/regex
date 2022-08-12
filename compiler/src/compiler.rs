@@ -204,7 +204,8 @@ pub fn compile(regex_ast: ast::Regex) -> Result<Instructions, String> {
                     let _ = sets.get(idx).unwrap();
                     Instructions::new(sets, insts).with_fast_forward(FastForward::Set(idx))
                 }
-                // catch-all
+                // This disables fast-forward for all other cases whcih
+                // primarily should be either an anchored or empty program.
                 _ => Instructions::new(sets, insts),
             }
         })

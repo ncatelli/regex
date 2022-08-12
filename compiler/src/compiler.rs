@@ -200,7 +200,7 @@ pub fn compile(regex_ast: ast::Regex) -> Result<Instructions, String> {
                 }
                 (false, Some(Opcode::ConsumeSet(InstConsumeSet { idx }))) => {
                     // panics if the set is undefined.
-                    // This should never happend
+                    // This should never happen.
                     let _ = sets.get(idx).unwrap();
                     Instructions::new(sets, insts).with_fast_forward(FastForward::Set(idx))
                 }

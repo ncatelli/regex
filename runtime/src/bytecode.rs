@@ -40,6 +40,8 @@ pub enum BytecodeDeserializationErrorKind {
     IntegerConversionToUsize,
     InvalidCharacterSetHeader,
     InvalidInstructionHeader,
+    /// Represents a deserialization error for an undefined opcode.
+    InvalidOpcode,
     /// EpsilonCond byte exceeds the allowable range of 0-7.
     OutOfBoundsEpsilonValue,
     /// The width of a given header segment doesn't align with the expected
@@ -127,6 +129,7 @@ impl std::fmt::Display for BytecodeDeserializationError {
             BytecodeDeserializationErrorKind::FastForwardVariantOutOfRange => {
                 write!(f, "fast-forward variant {}{}out of range", data, padding)
             }
+            BytecodeDeserializationErrorKind::InvalidOpcode => write!(f, "unknown opcode {}", data),
         }
     }
 }
@@ -662,7 +665,10 @@ impl<B: AsRef<[u8]>> FromBytecode<B> for crate::Opcode {
                     .with_data(slot_id.to_string())
                 }),
             (Some(InstMatch::OPCODE_BINARY_REPR), Some(0)) => Ok(Opcode::Match),
-            (Some(_), Some(_)) => todo!(),
+            (Some(other_opcode), Some(_)) => Err(BytecodeDeserializationError::new(
+                BytecodeDeserializationErrorKind::InvalidOpcode,
+            )
+            .with_data(format!("{}", other_opcode))),
             _ => unreachable!(),
         }
     }

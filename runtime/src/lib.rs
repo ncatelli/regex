@@ -656,6 +656,7 @@ pub enum CharacterAlphabet {
 
 impl CharacterAlphabet {
     /// Joins a group of character sets into a single `Ranges` variant character set.
+    #[deprecated = "Removing to eliminate the risk of runtime fallibility from a unicode category."]
     pub fn join(sets: Vec<Self>) -> CharacterAlphabet {
         let ranges = sets
             .into_iter()

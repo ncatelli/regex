@@ -37,7 +37,7 @@
 //!     // complete with a start and end position representing a non-inclusive
 //!     // range for the match. In this case a start of 2 and an end of 4
 //!     // signifies the match covers index 2 and 3 of the input, or `ll`.
-//!     Some([SaveGroupSlot::Complete { start: 2, end: 4 }]),
+//!     Some([SaveGroupSlot::Complete { expression_id: 0, start: 2, end: 4 }]),
 //!     result
 //! )
 //! ```

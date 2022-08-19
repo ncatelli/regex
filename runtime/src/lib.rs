@@ -7,7 +7,7 @@
 //!
 //! let progs = vec![
 //!     (
-//!         Some([SaveGroupSlot::complete(0, 1)]),
+//!         Some([SaveGroupSlot::complete(0, 0, 1)]),
 //!         Instructions::default().with_opcodes(vec![
 //!             Opcode::StartSave(InstStartSave::new(0)),
 //!             Opcode::Consume(InstConsume::new('a')),
@@ -46,7 +46,11 @@ pub enum SaveGroupSlot {
     /// No valid match for the slot has been found.
     None,
     /// A valid match has been found between the exlusive range of `start..end`.
-    Complete { start: usize, end: usize },
+    Complete {
+        expression_id: u32,
+        start: usize,
+        end: usize,
+    },
 }
 
 impl SaveGroupSlot {
@@ -63,8 +67,12 @@ impl SaveGroupSlot {
     }
 
     /// Returns a completed save group from its constituent parts.
-    pub const fn complete(start: usize, end: usize) -> Self {
-        Self::Complete { start, end }
+    pub const fn complete(expression_id: u32, start: usize, end: usize) -> Self {
+        Self::Complete {
+            expression_id,
+            start,
+            end,
+        }
     }
 }
 
@@ -74,7 +82,12 @@ impl From<SaveGroup> for SaveGroupSlot {
             SaveGroup::None => SaveGroupSlot::None,
             SaveGroup::Allocated { .. } => SaveGroupSlot::None,
             SaveGroup::Open { .. } => SaveGroupSlot::None,
-            SaveGroup::Complete { start, end, .. } => SaveGroupSlot::Complete { start, end },
+            SaveGroup::Complete {
+                expression_id,
+                start,
+                end,
+                ..
+            } => SaveGroupSlot::complete(expression_id, start, end),
         }
     }
 }
@@ -93,13 +106,18 @@ pub enum SaveGroup {
     /// Represents an allocated save slot (for cases where a StartSave
     /// operation have been encountered) but no consuming operations have
     /// occurred for a potential match on a thread.
-    Allocated { slot_id: usize },
+    Allocated { expression_id: u32, slot_id: usize },
     /// Represents an allocated Slot that has encountered atleast one potential
     /// consuming match but a full match for the slot has not yet been found
     /// (TL;DR pending EndSave).
-    Open { slot_id: usize, start: usize },
+    Open {
+        expression_id: u32,
+        slot_id: usize,
+        start: usize,
+    },
     /// A valid match with a defined start and end has been found.
     Complete {
+        expression_id: u32,
         slot_id: usize,
         start: usize,
         end: usize,
@@ -113,20 +131,28 @@ impl SaveGroup {
     }
 
     /// Instantiates a `SaveGroup::Allocated` for a given slot_id.
-    pub fn allocated(slot_id: usize) -> Self {
-        Self::Allocated { slot_id }
+    pub fn allocated(expression_id: u32, slot_id: usize) -> Self {
+        Self::Allocated {
+            slot_id,
+            expression_id,
+        }
     }
 
     /// Instantiates a `SaveGroup::Open` for a given slot id and start
     /// position.
-    pub fn open(slot_id: usize, start: usize) -> Self {
-        Self::Open { slot_id, start }
+    pub fn open(expression_id: u32, slot_id: usize, start: usize) -> Self {
+        Self::Open {
+            expression_id,
+            slot_id,
+            start,
+        }
     }
 
     /// Instantiates a `SaveGroup::Complete` for a given slot id, start and end
     /// position.
-    pub fn complete(slot_id: usize, start: usize, end: usize) -> Self {
+    pub fn complete(expression_id: u32, slot_id: usize, start: usize, end: usize) -> Self {
         Self::Complete {
+            expression_id,
             slot_id,
             start,
             end,
@@ -138,13 +164,33 @@ impl SaveGroup {
 /// branches current save state and an instruction pointer.
 #[derive(Debug)]
 struct Thread<const SG: usize> {
+    /// Represents the optional id of the threads enclosing expression
+    /// multi-expression programs.
+    expression_id: u32,
     save_groups: [SaveGroup; SG],
     inst: InstIndex,
 }
 
 impl<const SG: usize> Thread<SG> {
-    pub fn new(save_groups: [SaveGroup; SG], inst: InstIndex) -> Self {
-        Self { save_groups, inst }
+    fn new(save_groups: [SaveGroup; SG], inst: InstIndex) -> Self {
+        Self {
+            expression_id: 0,
+            save_groups,
+            inst,
+        }
+    }
+
+    fn new_with_id(expression_id: u32, save_groups: [SaveGroup; SG], inst: InstIndex) -> Self {
+        Self {
+            expression_id,
+            save_groups,
+            inst,
+        }
+    }
+
+    fn with_expression_id(mut self, expr_id: u32) -> Self {
+        self.expression_id = expr_id;
+        self
     }
 }
 
@@ -460,6 +506,8 @@ pub enum Opcode {
     EndSave(InstEndSave),
     /// A non-consuming operation that signifies a match.
     Match,
+    /// A non-consuming operation for setting execution metadata.
+    Meta(InstMeta),
 }
 
 impl Opcode {
@@ -504,6 +552,7 @@ impl Display for Opcode {
             Opcode::StartSave(i) => Display::fmt(&i, f),
             Opcode::EndSave(i) => Display::fmt(&i, f),
             Opcode::Match => Display::fmt(&InstMatch, f),
+            Opcode::Meta(i) => Display::fmt(&i, f),
         }
     }
 }
@@ -1013,6 +1062,27 @@ impl Display for InstMatch {
     }
 }
 
+/// An internal representation of the `Meta` opcode.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InstMeta(pub MetaKind);
+
+impl InstMeta {
+    pub const OPCODE_BINARY_REPR: u64 = 10;
+}
+
+impl Display for InstMeta {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            MetaKind::SetExpressionId(id) => write!(f, "Meta[SetExprID: ({})]", id),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum MetaKind {
+    SetExpressionId(u32),
+}
+
 /// A Window storing both the previous and next value of an input.
 #[derive(Debug, Clone, Copy)]
 struct Window<T: Copy> {
@@ -1152,7 +1222,7 @@ fn add_thread<const SG: usize>(
                 program,
                 save_groups,
                 thread_list,
-                Thread::new(t.save_groups, x),
+                Thread::new_with_id(t.expression_id, t.save_groups, x),
                 sp,
                 window,
             );
@@ -1161,7 +1231,7 @@ fn add_thread<const SG: usize>(
                 program,
                 save_groups,
                 thread_list,
-                Thread::new(t.save_groups, y),
+                Thread::new_with_id(t.expression_id, t.save_groups, y),
                 sp,
                 window,
             )
@@ -1170,30 +1240,30 @@ fn add_thread<const SG: usize>(
             program,
             save_groups,
             thread_list,
-            Thread::new(t.save_groups, *next),
+            Thread::new_with_id(t.expression_id, t.save_groups, *next),
             sp,
             window,
         ),
         Opcode::StartSave(InstStartSave { slot_id }) => {
             let mut groups = t.save_groups;
-            groups[*slot_id] = SaveGroup::Allocated { slot_id: *slot_id };
+            groups[*slot_id] = SaveGroup::allocated(t.expression_id, *slot_id);
 
             add_thread(
                 program,
                 save_groups,
                 thread_list,
-                Thread::new(groups, default_next_inst_idx),
+                Thread::new_with_id(t.expression_id, groups, default_next_inst_idx),
                 sp,
                 window,
             )
         }
         Opcode::EndSave(InstEndSave { slot_id }) => {
             let closed_save = match t.save_groups.get(*slot_id) {
-                Some(SaveGroup::Open { slot_id, start }) => SaveGroup::Complete {
-                    slot_id: *slot_id,
-                    start: *start,
-                    end: sp,
-                },
+                Some(SaveGroup::Open {
+                    expression_id,
+                    slot_id,
+                    start,
+                }) => SaveGroup::complete(*expression_id, *slot_id, *start, sp),
 
                 // if the save group is not open, return none.
                 Some(sg) => *sg,
@@ -1235,7 +1305,7 @@ fn add_thread<const SG: usize>(
                 program,
                 save_groups,
                 thread_list,
-                Thread::new(thread_save_group, default_next_inst_idx),
+                Thread::new_with_id(t.expression_id, thread_save_group, default_next_inst_idx),
                 sp,
                 window,
             )
@@ -1246,7 +1316,7 @@ fn add_thread<const SG: usize>(
             program,
             save_groups,
             thread_list,
-            Thread::new(t.save_groups, default_next_inst_idx),
+            Thread::new_with_id(t.expression_id, t.save_groups, default_next_inst_idx),
             sp,
             window,
         ),
@@ -1269,7 +1339,11 @@ fn add_thread<const SG: usize>(
                             program,
                             save_groups,
                             thread_list,
-                            Thread::new(t.save_groups, default_next_inst_idx),
+                            Thread::new_with_id(
+                                t.expression_id,
+                                t.save_groups,
+                                default_next_inst_idx,
+                            ),
                             sp,
                             window,
                         )
@@ -1294,7 +1368,7 @@ fn add_thread<const SG: usize>(
                     program,
                     save_groups,
                     thread_list,
-                    Thread::new(t.save_groups, default_next_inst_idx),
+                    Thread::new_with_id(t.expression_id, t.save_groups, default_next_inst_idx),
                     sp,
                     window,
                 )
@@ -1321,7 +1395,7 @@ fn add_thread<const SG: usize>(
                     program,
                     save_groups,
                     thread_list,
-                    Thread::new(t.save_groups, default_next_inst_idx),
+                    Thread::new_with_id(t.expression_id, t.save_groups, default_next_inst_idx),
                     sp,
                     window,
                 )
@@ -1348,7 +1422,7 @@ fn add_thread<const SG: usize>(
                     program,
                     save_groups,
                     thread_list,
-                    Thread::new(t.save_groups, default_next_inst_idx),
+                    Thread::new_with_id(t.expression_id, t.save_groups, default_next_inst_idx),
                     sp,
                     window,
                 )
@@ -1357,6 +1431,17 @@ fn add_thread<const SG: usize>(
             }
         }
 
+        // Meta instructions
+        Opcode::Meta(InstMeta(MetaKind::SetExpressionId(expr_id))) => add_thread(
+            program,
+            save_groups,
+            thread_list,
+            Thread::new_with_id(*expr_id, t.save_groups, default_next_inst_idx),
+            sp,
+            window,
+        ),
+
+        // catch all for threads that can't be live-evaluated.
         _ => {
             thread_list.threads.push(t);
             thread_list
@@ -1446,7 +1531,11 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
                         instructions,
                         &mut sub,
                         next_thread_list,
-                        Thread::new(thread_local_save_group, default_next_inst_idx),
+                        Thread::new_with_id(
+                            thread.expression_id,
+                            thread_local_save_group,
+                            default_next_inst_idx,
+                        ),
                         next_input_idx,
                         next_window,
                     );
@@ -1456,8 +1545,12 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
                     let mut thread_local_save_group = thread_save_groups;
 
                     for thr in thread_local_save_group.iter_mut() {
-                        if let SaveGroup::Allocated { slot_id } = thr {
-                            *thr = SaveGroup::open(*slot_id, input_idx);
+                        if let SaveGroup::Allocated {
+                            expression_id,
+                            slot_id,
+                        } = thr
+                        {
+                            *thr = SaveGroup::open(*expression_id, *slot_id, input_idx);
                         }
                     }
 
@@ -1465,7 +1558,8 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
                         instructions,
                         &mut sub,
                         next_thread_list,
-                        Thread::new(thread_local_save_group, default_next_inst_idx),
+                        Thread::new(thread_local_save_group, default_next_inst_idx)
+                            .with_expression_id(thread.expression_id),
                         next_input_idx,
                         next_window,
                     );
@@ -1478,8 +1572,12 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
                 {
                     let mut thread_local_save_group = thread_save_groups;
                     for thr in thread_local_save_group.iter_mut() {
-                        if let SaveGroup::Allocated { slot_id } = thr {
-                            *thr = SaveGroup::open(*slot_id, input_idx);
+                        if let SaveGroup::Allocated {
+                            expression_id,
+                            slot_id,
+                        } = thr
+                        {
+                            *thr = SaveGroup::open(*expression_id, *slot_id, input_idx);
                         }
                     }
 
@@ -1487,7 +1585,11 @@ pub fn run<const SG: usize>(program: &Instructions, input: &str) -> Option<[Save
                         instructions,
                         &mut sub,
                         next_thread_list,
-                        Thread::<SG>::new(thread_local_save_group, default_next_inst_idx),
+                        Thread::<SG>::new_with_id(
+                            thread.expression_id,
+                            thread_local_save_group,
+                            default_next_inst_idx,
+                        ),
                         next_input_idx,
                         next_window,
                     );
@@ -1528,7 +1630,7 @@ mod tests {
     fn should_evaluate_simple_linear_match_expression() {
         let progs = vec![
             (
-                Some([SaveGroupSlot::complete(0, 1)]),
+                Some([SaveGroupSlot::complete(0, 0, 1)]),
                 Instructions::default().with_opcodes(vec![
                     Opcode::StartSave(InstStartSave::new(0)),
                     Opcode::Consume(InstConsume::new('a')),
@@ -1567,10 +1669,10 @@ mod tests {
             Opcode::Match,
         ]);
         let input_output = vec![
-            ("a", Some([SaveGroupSlot::complete(0, 1)])),
-            ("b", Some([SaveGroupSlot::complete(0, 1)])),
-            ("ab", Some([SaveGroupSlot::complete(0, 1)])),
-            ("ba", Some([SaveGroupSlot::complete(0, 1)])),
+            ("a", Some([SaveGroupSlot::complete(0, 0, 1)])),
+            ("b", Some([SaveGroupSlot::complete(0, 0, 1)])),
+            ("ab", Some([SaveGroupSlot::complete(0, 0, 1)])),
+            ("ba", Some([SaveGroupSlot::complete(0, 0, 1)])),
             ("c", None),
         ];
 
@@ -1584,27 +1686,27 @@ mod tests {
     fn should_evaluate_set_match_expression() {
         let progs = vec![
             (
-                Some([SaveGroupSlot::complete(0, 1)]),
+                Some([SaveGroupSlot::complete(0, 0, 1)]),
                 Opcode::ConsumeSet(InstConsumeSet::member_of(0)),
             ),
             (None, Opcode::ConsumeSet(InstConsumeSet::member_of(1))),
             (
-                Some([SaveGroupSlot::complete(0, 1)]),
+                Some([SaveGroupSlot::complete(0, 0, 1)]),
                 Opcode::ConsumeSet(InstConsumeSet::member_of(3)),
             ),
             (None, Opcode::ConsumeSet(InstConsumeSet::member_of(2))),
             (
-                Some([SaveGroupSlot::complete(0, 1)]),
+                Some([SaveGroupSlot::complete(0, 0, 1)]),
                 Opcode::ConsumeSet(InstConsumeSet::member_of(4)),
             ),
             (None, Opcode::ConsumeSet(InstConsumeSet::member_of(5))),
             (
-                Some([SaveGroupSlot::complete(0, 1)]),
+                Some([SaveGroupSlot::complete(0, 0, 1)]),
                 Opcode::ConsumeSet(InstConsumeSet::member_of(7)),
             ),
             (None, Opcode::ConsumeSet(InstConsumeSet::member_of(6))),
             (
-                Some([SaveGroupSlot::complete(0, 1)]),
+                Some([SaveGroupSlot::complete(0, 0, 1)]),
                 Opcode::ConsumeSet(InstConsumeSet::member_of(8)),
             ),
             (None, Opcode::ConsumeSet(InstConsumeSet::member_of(9))),
@@ -1645,8 +1747,8 @@ mod tests {
     fn should_evaluate_eager_character_class_zero_or_one_expression() {
         let tests = vec![
             (None, "aab"),
-            (Some([SaveGroupSlot::complete(0, 1)]), "1ab"),
-            (Some([SaveGroupSlot::complete(0, 2)]), "123"),
+            (Some([SaveGroupSlot::complete(0, 0, 1)]), "1ab"),
+            (Some([SaveGroupSlot::complete(0, 0, 2)]), "123"),
         ];
 
         // `^\d\d?` | `^[0-9][0-9]?`
@@ -1673,8 +1775,8 @@ mod tests {
     fn should_evaluate_eager_character_class_zero_or_more_expression() {
         let tests = vec![
             (None, "aab"),
-            (Some([SaveGroupSlot::complete(0, 1)]), "1ab"),
-            (Some([SaveGroupSlot::complete(0, 3)]), "123"),
+            (Some([SaveGroupSlot::complete(0, 0, 1)]), "1ab"),
+            (Some([SaveGroupSlot::complete(0, 0, 3)]), "123"),
         ];
 
         // `^\d\d*` | `^[0-9][0-9]*`
@@ -1702,8 +1804,8 @@ mod tests {
     fn should_evaluate_eager_character_class_one_or_more_expression() {
         let tests = vec![
             (None, "aab"),
-            (Some([SaveGroupSlot::complete(0, 1)]), "1ab"),
-            (Some([SaveGroupSlot::complete(0, 3)]), "123"),
+            (Some([SaveGroupSlot::complete(0, 0, 1)]), "1ab"),
+            (Some([SaveGroupSlot::complete(0, 0, 3)]), "123"),
         ];
 
         // `^\d+` | `^[0-9]+`
@@ -1731,8 +1833,8 @@ mod tests {
     fn should_evaluate_eager_unicode_category_one_or_more_expression() {
         let tests = vec![
             (None, "123"),
-            (Some([SaveGroupSlot::complete(0, 1)]), "a12"),
-            (Some([SaveGroupSlot::complete(0, 3)]), "aab"),
+            (Some([SaveGroupSlot::complete(0, 0, 1)]), "a12"),
+            (Some([SaveGroupSlot::complete(0, 0, 3)]), "aab"),
         ];
 
         // `^\p{Letter}+`
@@ -1760,7 +1862,7 @@ mod tests {
     fn should_evaluate_consecutive_diverging_match_expression() {
         let progs = vec![
             (
-                [SaveGroupSlot::complete(0, 2)],
+                [SaveGroupSlot::complete(0, 0, 2)],
                 Instructions::default().with_opcodes(vec![
                     Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
                     Opcode::Any,
@@ -1773,7 +1875,7 @@ mod tests {
                 ]),
             ),
             (
-                [SaveGroupSlot::complete(1, 3)],
+                [SaveGroupSlot::complete(0, 1, 3)],
                 Instructions::default().with_opcodes(vec![
                     Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
                     Opcode::Any,
@@ -1798,7 +1900,7 @@ mod tests {
     #[test]
     fn should_match_first_match_in_unanchored_expression() {
         let (save_group, prog) = (
-            [SaveGroupSlot::complete(0, 2)],
+            [SaveGroupSlot::complete(0, 0, 2)],
             Instructions::default().with_opcodes(vec![
                 Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
                 Opcode::Any,
@@ -1821,7 +1923,10 @@ mod tests {
     fn should_evaluate_multiple_save_groups_expression() {
         // (aa)(b)
         let (expected_res, prog) = (
-            [SaveGroupSlot::complete(0, 2), SaveGroupSlot::complete(2, 3)],
+            [
+                SaveGroupSlot::complete(0, 0, 2),
+                SaveGroupSlot::complete(0, 2, 3),
+            ],
             Instructions::default().with_opcodes(vec![
                 Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
                 Opcode::Any,
@@ -1846,9 +1951,9 @@ mod tests {
     #[test]
     fn should_evaluate_eager_match_zero_or_one_expression() {
         let tests = vec![
-            ([SaveGroupSlot::complete(0, 2)], "aab"),
-            ([SaveGroupSlot::complete(0, 3)], "aaab"),
-            ([SaveGroupSlot::complete(0, 3)], "aaaab"),
+            ([SaveGroupSlot::complete(0, 0, 2)], "aab"),
+            ([SaveGroupSlot::complete(0, 0, 3)], "aaab"),
+            ([SaveGroupSlot::complete(0, 0, 3)], "aaaab"),
         ];
 
         // `^(aaa?)`
@@ -1873,8 +1978,8 @@ mod tests {
     fn should_evaluate_lazy_match_zero_or_one_expression() {
         let tests = vec![
             (None, "aab"),
-            (Some([SaveGroupSlot::complete(0, 3)]), "aaab"),
-            (Some([SaveGroupSlot::complete(0, 4)]), "aaaab"),
+            (Some([SaveGroupSlot::complete(0, 0, 3)]), "aaab"),
+            (Some([SaveGroupSlot::complete(0, 0, 4)]), "aaaab"),
         ];
 
         // `^(aaa??)`
@@ -1899,8 +2004,8 @@ mod tests {
     #[test]
     fn should_evaluate_eager_match_exact_quantifier_expression() {
         let tests = vec![
-            ([SaveGroupSlot::complete(0, 2)], "aab"),
-            ([SaveGroupSlot::complete(0, 2)], "aaab"),
+            ([SaveGroupSlot::complete(0, 0, 2)], "aab"),
+            ([SaveGroupSlot::complete(0, 0, 2)], "aaab"),
         ];
 
         let prog = Instructions::new(
@@ -1923,8 +2028,8 @@ mod tests {
     #[test]
     fn should_evaluate_eager_match_atleast_quantifier_expression() {
         let tests = vec![
-            ([SaveGroupSlot::complete(0, 2)], "aab"),
-            ([SaveGroupSlot::complete(0, 3)], "aaab"),
+            ([SaveGroupSlot::complete(0, 0, 2)], "aab"),
+            ([SaveGroupSlot::complete(0, 0, 3)], "aaab"),
         ];
 
         let prog = Instructions::default().with_opcodes(vec![
@@ -1947,9 +2052,9 @@ mod tests {
     #[test]
     fn should_evaluate_eager_match_between_quantifier_expression() {
         let tests = vec![
-            ([SaveGroupSlot::complete(0, 2)], "aab"),
-            ([SaveGroupSlot::complete(0, 3)], "aaab"),
-            ([SaveGroupSlot::complete(0, 4)], "aaaab"),
+            ([SaveGroupSlot::complete(0, 0, 2)], "aab"),
+            ([SaveGroupSlot::complete(0, 0, 3)], "aaab"),
+            ([SaveGroupSlot::complete(0, 0, 4)], "aaaab"),
         ];
 
         let prog = Instructions::default().with_opcodes(vec![
@@ -1986,7 +2091,10 @@ mod tests {
 
         let res = run::<2>(&prog, "ab");
         assert_eq!(
-            Some([SaveGroupSlot::complete(0, 2), SaveGroupSlot::complete(1, 2),]),
+            Some([
+                SaveGroupSlot::complete(0, 0, 2),
+                SaveGroupSlot::complete(0, 1, 2),
+            ]),
             res
         );
     }
@@ -2010,7 +2118,10 @@ mod tests {
 
         let res = run::<2>(&prog, "abbb");
         assert_eq!(
-            Some([SaveGroupSlot::complete(0, 4), SaveGroupSlot::complete(1, 4),]),
+            Some([
+                SaveGroupSlot::complete(0, 0, 4),
+                SaveGroupSlot::complete(0, 1, 4),
+            ]),
             res
         );
     }
@@ -2019,10 +2130,10 @@ mod tests {
     fn should_match_start_of_string_only_anchor() {
         let tests = vec![
             (None, "caa"),
-            (Some([SaveGroupSlot::complete(0, 1)]), "baab"),
-            (Some([SaveGroupSlot::complete(0, 1)]), "aab"),
-            (Some([SaveGroupSlot::complete(3, 4)]), " aab"),
-            (Some([SaveGroupSlot::complete(0, 1)]), "baab\naab"),
+            (Some([SaveGroupSlot::complete(0, 0, 1)]), "baab"),
+            (Some([SaveGroupSlot::complete(0, 0, 1)]), "aab"),
+            (Some([SaveGroupSlot::complete(0, 3, 4)]), " aab"),
+            (Some([SaveGroupSlot::complete(0, 0, 1)]), "baab\naab"),
         ];
 
         // ((?:\Aa)|(?:b))
@@ -2050,11 +2161,11 @@ mod tests {
     fn should_follow_word_boundary_epsilon_transition_on_start_of_input_or_whitespace() {
         let tests = vec![
             (None, "baab"),
-            (Some([SaveGroupSlot::complete(0, 2)]), "aab"),
-            (Some([SaveGroupSlot::complete(0, 2)]), "aaab"),
-            (Some([SaveGroupSlot::complete(1, 3)]), " aab"),
-            (Some([SaveGroupSlot::complete(1, 3)]), " aaaab"),
-            (Some([SaveGroupSlot::complete(5, 7)]), "baab\naab"),
+            (Some([SaveGroupSlot::complete(0, 0, 2)]), "aab"),
+            (Some([SaveGroupSlot::complete(0, 0, 2)]), "aaab"),
+            (Some([SaveGroupSlot::complete(0, 1, 3)]), " aab"),
+            (Some([SaveGroupSlot::complete(0, 1, 3)]), " aaaab"),
+            (Some([SaveGroupSlot::complete(0, 5, 7)]), "baab\naab"),
         ];
 
         // (\baa)
@@ -2080,10 +2191,10 @@ mod tests {
     fn should_follow_word_boundary_epsilon_transition_on_end_of_input_or_whitespace() {
         let tests = vec![
             (None, "baab"),
-            (Some([SaveGroupSlot::complete(1, 3)]), "baa"),
-            (Some([SaveGroupSlot::complete(2, 4)]), "baaa"),
-            (Some([SaveGroupSlot::complete(1, 3)]), "baa "),
-            (Some([SaveGroupSlot::complete(2, 4)]), "baaa "),
+            (Some([SaveGroupSlot::complete(0, 1, 3)]), "baa"),
+            (Some([SaveGroupSlot::complete(0, 2, 4)]), "baaa"),
+            (Some([SaveGroupSlot::complete(0, 1, 3)]), "baa "),
+            (Some([SaveGroupSlot::complete(0, 2, 4)]), "baaa "),
         ];
 
         // (aa\b)
@@ -2110,10 +2221,10 @@ mod tests {
         let tests = vec![
             (None, "aab"),
             (None, " aab"),
-            (Some([SaveGroupSlot::complete(1, 3)]), "baab"),
-            (Some([SaveGroupSlot::complete(1, 3)]), "aaab"),
-            (Some([SaveGroupSlot::complete(2, 4)]), " aaaab"),
-            (Some([SaveGroupSlot::complete(1, 3)]), "baab\naab"),
+            (Some([SaveGroupSlot::complete(0, 1, 3)]), "baab"),
+            (Some([SaveGroupSlot::complete(0, 1, 3)]), "aaab"),
+            (Some([SaveGroupSlot::complete(0, 2, 4)]), " aaaab"),
+            (Some([SaveGroupSlot::complete(0, 1, 3)]), "baab\naab"),
         ];
 
         // (\Baa)
@@ -2141,10 +2252,10 @@ mod tests {
             (None, "baab"),
             (None, "baa "),
             (None, "baaa "),
-            (Some([SaveGroupSlot::complete(1, 3)]), "baa"),
-            (Some([SaveGroupSlot::complete(2, 4)]), "baaa"),
+            (Some([SaveGroupSlot::complete(0, 1, 3)]), "baa"),
+            (Some([SaveGroupSlot::complete(0, 2, 4)]), "baaa"),
             // match on trailing newline
-            (Some([SaveGroupSlot::complete(2, 4)]), "baaa\n"),
+            (Some([SaveGroupSlot::complete(0, 2, 4)]), "baaa\n"),
         ];
 
         // (aa$)
@@ -2173,8 +2284,8 @@ mod tests {
             (None, "baa "),
             (None, "baaa "),
             (None, "baaa\n"),
-            (Some([SaveGroupSlot::complete(1, 3)]), "baa"),
-            (Some([SaveGroupSlot::complete(2, 4)]), "baaa"),
+            (Some([SaveGroupSlot::complete(0, 1, 3)]), "baa"),
+            (Some([SaveGroupSlot::complete(0, 2, 4)]), "baaa"),
         ];
 
         // (aa$)
@@ -2201,7 +2312,10 @@ mod tests {
         let tests = vec![
             (None, "aa"),
             (
-                Some([SaveGroupSlot::complete(0, 2), SaveGroupSlot::complete(0, 1)]),
+                Some([
+                    SaveGroupSlot::complete(0, 0, 2),
+                    SaveGroupSlot::complete(0, 0, 1),
+                ]),
                 "ab",
             ),
         ];
@@ -2253,7 +2367,7 @@ mod tests {
     fn should_correctly_handle_indexing_over_unicode() {
         // (b)
         let (expected_res, prog) = (
-            [SaveGroupSlot::complete(1, 2)],
+            [SaveGroupSlot::complete(0, 1, 2)],
             Instructions::default().with_opcodes(vec![
                 Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
                 Opcode::Any,
@@ -2275,7 +2389,7 @@ mod tests {
     fn should_handle_fast_forwarding_match() {
         // (d)
         let (expected_res, prog) = (
-            [SaveGroupSlot::complete(3, 4)],
+            [SaveGroupSlot::complete(0, 3, 4)],
             Instructions::default()
                 .with_opcodes(vec![
                     Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
@@ -2322,5 +2436,25 @@ mod tests {
 
         let res = run::<0>(&prog, input);
         assert!(res.is_some())
+    }
+
+    #[test]
+    fn should_allow_setting_of_expression_id_via_meta_expression() {
+        // (a)
+        let prog = Instructions::default().with_opcodes(vec![
+            Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
+            Opcode::Any,
+            Opcode::Jmp(InstJmp::new(InstIndex::from(0))),
+            Opcode::Meta(InstMeta(MetaKind::SetExpressionId(1))),
+            Opcode::StartSave(InstStartSave::new(0)),
+            Opcode::Consume(InstConsume::new('a')),
+            Opcode::EndSave(InstEndSave::new(0)),
+            Opcode::Match,
+        ]);
+
+        let input = "bcdea";
+
+        let res = run::<1>(&prog, input);
+        assert_eq!(Some([SaveGroupSlot::complete(1, 4, 5)]), res)
     }
 }

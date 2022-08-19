@@ -45,12 +45,12 @@ fn should_preserve_expected_semantics_from_parse_through_serialization() {
 
     let input = "\"hello\"";
     assert_eq!(
-        Some([SaveGroupSlot::complete(1, 6)]),
+        Some([SaveGroupSlot::complete(0, 1, 6)]),
         regex_runtime::run::<1>(&insts, input)
     );
 
     assert_eq!(
-        Some([SaveGroupSlot::complete(1, 6)]),
+        Some([SaveGroupSlot::complete(0, 1, 6)]),
         regex_runtime::run::<1>(&deserialized_insts, input)
     );
 }

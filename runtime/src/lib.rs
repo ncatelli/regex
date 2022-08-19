@@ -1078,8 +1078,11 @@ impl Display for InstMeta {
     }
 }
 
+/// Represents the kind of Metadata operation to trigger.
 #[derive(Debug, Clone, PartialEq)]
 pub enum MetaKind {
+    /// Sets expression id on a thread. This _ONLY_ comes into play in
+    /// multi-expression runs.
     SetExpressionId(u32),
 }
 

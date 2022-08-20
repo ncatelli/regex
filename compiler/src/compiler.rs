@@ -57,6 +57,7 @@ enum RelativeOpcode {
     StartSave(usize),
     EndSave(usize),
     Match,
+    Meta(MetaKind),
 }
 
 impl RelativeOpcode {
@@ -96,6 +97,7 @@ impl RelativeOpcode {
 
                 Some(Opcode::ConsumeSet(InstConsumeSet { idx: set_idx }))
             }
+            RelativeOpcode::Meta(kind) => Some(Opcode::Meta(InstMeta::new(kind))),
         }
     }
 
@@ -167,7 +169,7 @@ pub fn compile(regex_ast: ast::Regex) -> Result<Instructions, String> {
     };
 
     relative_ops
-        .map(|rel_ops| convert_relative_ops_to_absolute_ops(0, rel_ops))
+        .map(convert_relative_ops_to_absolute_ops)
         .map(|(sets, insts)| {
             let first_available_stop = (insts)
                 .iter()
@@ -191,8 +193,124 @@ pub fn compile(regex_ast: ast::Regex) -> Result<Instructions, String> {
         })
 }
 
+pub fn compile_many(regex_asts: Vec<ast::Regex>) -> Result<Instructions, String> {
+    let mut anchored = Vec::with_capacity(regex_asts.len());
+    let mut unanchored = Vec::with_capacity(regex_asts.len());
+
+    // populate the above lists of anchored and unanchored programs.
+    for (expr_id, regex_ast) in regex_asts.into_iter().enumerate() {
+        // reset save group id to 0
+        SAVE_GROUP_ID.store(0, Ordering::SeqCst);
+
+        let expr_id = u32::try_from(expr_id).unwrap();
+
+        // Start
+        let mut relative_expression_opcodes =
+            vec![RelativeOpcode::Meta(MetaKind::SetExpressionId(expr_id))];
+
+        match regex_ast {
+            ast::Regex::StartOfStringAnchored(expr) => {
+                let mut generated_opcodes = expression(expr)?;
+                relative_expression_opcodes.append(&mut generated_opcodes);
+                relative_expression_opcodes.push(RelativeOpcode::Match);
+                anchored.push(relative_expression_opcodes);
+            }
+
+            ast::Regex::Unanchored(expr) => {
+                let mut generated_opcodes = expression(expr)?;
+                relative_expression_opcodes.append(&mut generated_opcodes);
+                relative_expression_opcodes.push(RelativeOpcode::Match);
+                unanchored.push(relative_expression_opcodes);
+            }
+        };
+    }
+
+    let anchored_expression_cnt = anchored.len();
+    let anchored_opcode_cnt = anchored.iter().map(|expr| expr.len()).sum::<usize>();
+
+    let unanchored_expression_cnt = unanchored.len();
+    let unanchored_offsets_from_start_of_exprs = generate_offsets_from_start(&unanchored);
+
+    let has_both_anchored_and_unanchored_segments =
+        (unanchored_expression_cnt > 0) && (anchored_expression_cnt > 0);
+
+    let mut offset_stack = generate_offsets_from_start(&anchored)
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>();
+
+    let mut anchored_expr_splits = vec![];
+    while offset_stack.len() > 1 {
+        let trailing_splits = i32::try_from(anchored_expr_splits.len()).unwrap();
+
+        // safe to unwrap due to above check.
+        let primary_start = offset_stack.pop().unwrap() + trailing_splits + 1;
+        let secondary_start = offset_stack.pop().unwrap() + trailing_splits + 1;
+        anchored_expr_splits.push(RelativeOpcode::Split(primary_start, secondary_start));
+
+        offset_stack.push(secondary_start);
+    }
+
+    let unanchored_prefix = vec![
+        RelativeOpcode::Split(3, 1),
+        RelativeOpcode::Any,
+        // jmp to the first unanchored split (start of unanchored)
+        RelativeOpcode::Jmp(-2),
+    ];
+
+    let mut offset_stack = unanchored_offsets_from_start_of_exprs
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>();
+
+    let mut unanchored_expr_splits = vec![];
+    while offset_stack.len() > 1 {
+        let trailing_splits = i32::try_from(unanchored_expr_splits.len()).unwrap();
+
+        // safe to unwrap due to above check.
+        let primary_start = offset_stack.pop().unwrap() + trailing_splits + 1;
+        let secondary_start = offset_stack.pop().unwrap() + trailing_splits + 1;
+        unanchored_expr_splits.push(RelativeOpcode::Split(primary_start, secondary_start));
+
+        offset_stack.push(secondary_start);
+    }
+
+    let anchored_prefix = if has_both_anchored_and_unanchored_segments {
+        let start_of_unanchored_exprs =
+            i32::try_from(anchored_expr_splits.len() + anchored_opcode_cnt + 1).unwrap();
+
+        vec![RelativeOpcode::Split(1, start_of_unanchored_exprs)]
+    } else {
+        vec![]
+    };
+
+    let joined_opcodes = anchored_prefix
+        .into_iter()
+        .chain(anchored_expr_splits.into_iter())
+        .chain(anchored.into_iter().flatten())
+        .chain(unanchored_prefix.into_iter())
+        .chain(unanchored_expr_splits.into_iter())
+        .chain(unanchored.into_iter().flatten())
+        .collect::<Vec<_>>();
+
+    let (sets, opcodes) = convert_relative_ops_to_absolute_ops(joined_opcodes);
+
+    Ok(Instructions::new(sets, opcodes))
+}
+
+fn generate_offsets_from_start(rel_exprs: &[Vec<RelativeOpcode>]) -> Vec<i32> {
+    let mut prev = 0;
+    let mut offsets_from_start = Vec::with_capacity(rel_exprs.len());
+
+    for rel_expr in rel_exprs {
+        offsets_from_start.push(prev);
+        prev += i32::try_from(rel_expr.len()).unwrap();
+    }
+
+    offsets_from_start
+}
+
 fn convert_relative_ops_to_absolute_ops(
-    opcode_base_offset: usize,
     rel_ops: RelativeOpcodes,
 ) -> (Vec<CharacterSet>, Vec<Opcode>) {
     let (sets, absolute_insts) = rel_ops
@@ -201,8 +319,7 @@ fn convert_relative_ops_to_absolute_ops(
         // truncate idx to a u32
         .map(|(idx, sets)| {
             (
-                (opcode_base_offset + idx)
-                    .try_into()
+                idx.try_into()
                     .expect("index overflows a 32-bit signed integer"),
                 sets,
             )
@@ -2186,6 +2303,82 @@ mod tests {
                 Opcode::Match,
             ])),
             compile(regex_ast)
+        );
+    }
+
+    #[test]
+    fn should_compile_many_should_build_correct_single_program() {
+        // approximate to `^(a)`
+        let regex_ast_anchored =
+            Regex::StartOfStringAnchored(Expression(vec![SubExpression(vec![
+                SubExpressionItem::Group(Group::Capturing {
+                    expression: Expression(vec![SubExpression(vec![SubExpressionItem::Match(
+                        Match::WithoutQuantifier {
+                            item: MatchItem::MatchCharacter(MatchCharacter(Char('a'))),
+                        },
+                    )])]),
+                }),
+            ])]));
+
+        let regex_ast_unanchored = ['b', 'c'].into_iter().map(|c| {
+            Regex::Unanchored(Expression(vec![SubExpression(vec![
+                SubExpressionItem::Group(Group::Capturing {
+                    expression: Expression(vec![SubExpression(vec![SubExpressionItem::Match(
+                        Match::WithoutQuantifier {
+                            item: MatchItem::MatchCharacter(MatchCharacter(Char(c))),
+                        },
+                    )])]),
+                }),
+            ])]))
+        });
+
+        let all_exprs = // [regex_ast_anchored]
+        [regex_ast_anchored]
+            .into_iter()
+            .chain(regex_ast_unanchored)
+            .collect();
+
+        // reset the save group id.
+        SAVE_GROUP_ID.store(0, std::sync::atomic::Ordering::SeqCst);
+
+        let results = compile_many(all_exprs);
+        let expected = vec![
+            Opcode::Split(InstSplit::new(InstIndex::from(1), InstIndex::from(6))),
+            Opcode::Meta(InstMeta(MetaKind::SetExpressionId(0))),
+            // first anchored expr
+            Opcode::StartSave(InstStartSave::new(0)),
+            Opcode::Consume(InstConsume::new('a')),
+            Opcode::EndSave(InstEndSave::new(0)),
+            Opcode::Match,
+            // unanchored start
+            Opcode::Split(InstSplit::new(InstIndex::from(9), InstIndex::from(7))),
+            Opcode::Any,
+            Opcode::Jmp(InstJmp::new(InstIndex::from(6))),
+            Opcode::Split(InstSplit::new(InstIndex::from(10), InstIndex::from(15))),
+            // first unanchored expr
+            Opcode::Meta(InstMeta(MetaKind::SetExpressionId(1))),
+            Opcode::StartSave(InstStartSave::new(0)),
+            Opcode::Consume(InstConsume::new('b')),
+            Opcode::EndSave(InstEndSave::new(0)),
+            Opcode::Match,
+            // second unanchored expr
+            Opcode::Meta(InstMeta(MetaKind::SetExpressionId(2))),
+            Opcode::StartSave(InstStartSave::new(0)),
+            Opcode::Consume(InstConsume::new('c')),
+            Opcode::EndSave(InstEndSave::new(0)),
+            Opcode::Match,
+        ];
+
+        assert_eq!(
+            expected.len(),
+            results.as_ref().map(|ops| ops.len()).unwrap_or(0)
+        );
+
+        assert_eq!(
+            &Ok(Instructions::default().with_opcodes(expected)),
+            &results,
+            "{:#?}",
+            &results
         );
     }
 }

@@ -167,27 +167,7 @@ pub fn compile(regex_ast: ast::Regex) -> Result<Instructions, String> {
     };
 
     relative_ops
-        .map(|rel_ops| {
-            let (sets, absolute_insts) = rel_ops
-                .into_iter()
-                .enumerate()
-                // truncate idx to a u32
-                .map(|(idx, sets)| {
-                    (
-                        idx.try_into()
-                            .expect("index overflows a 32-bit signed integer"),
-                        sets,
-                    )
-                })
-                .fold((vec![], vec![]), |(mut sets, mut insts), (idx, opcode)| {
-                    let absolute_opcode = opcode.into_opcode_with_index_unchecked(&mut sets, idx);
-                    insts.push(absolute_opcode);
-
-                    (sets, insts)
-                });
-
-            (sets, absolute_insts)
-        })
+        .map(|rel_ops| convert_relative_ops_to_absolute_ops(0, rel_ops))
         .map(|(sets, insts)| {
             let first_available_stop = (insts)
                 .iter()
@@ -209,6 +189,32 @@ pub fn compile(regex_ast: ast::Regex) -> Result<Instructions, String> {
                 _ => Instructions::new(sets, insts),
             }
         })
+}
+
+fn convert_relative_ops_to_absolute_ops(
+    opcode_base_offset: usize,
+    rel_ops: RelativeOpcodes,
+) -> (Vec<CharacterSet>, Vec<Opcode>) {
+    let (sets, absolute_insts) = rel_ops
+        .into_iter()
+        .enumerate()
+        // truncate idx to a u32
+        .map(|(idx, sets)| {
+            (
+                (opcode_base_offset + idx)
+                    .try_into()
+                    .expect("index overflows a 32-bit signed integer"),
+                sets,
+            )
+        })
+        .fold((vec![], vec![]), |(mut sets, mut insts), (idx, opcode)| {
+            let absolute_opcode = opcode.into_opcode_with_index_unchecked(&mut sets, idx);
+            insts.push(absolute_opcode);
+
+            (sets, insts)
+        });
+
+    (sets, absolute_insts)
 }
 
 fn expression(expr: ast::Expression) -> Result<RelativeOpcodes, String> {

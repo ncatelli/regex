@@ -1068,6 +1068,10 @@ pub struct InstMeta(pub MetaKind);
 
 impl InstMeta {
     pub const OPCODE_BINARY_REPR: u64 = 10;
+
+    pub fn new(kind: MetaKind) -> Self {
+        Self(kind)
+    }
 }
 
 impl Display for InstMeta {

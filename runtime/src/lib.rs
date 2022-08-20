@@ -2464,4 +2464,52 @@ mod tests {
         let res = run::<1>(&prog, input);
         assert_eq!(Some([SaveGroupSlot::complete(1, 4, 5)]), res)
     }
+
+    #[test]
+    fn should_evaluate_multi_expression_program() {
+        let prog = Instructions::default().with_opcodes(vec![
+            Opcode::Split(InstSplit::new(InstIndex::from(1), InstIndex::from(6))),
+            Opcode::Meta(InstMeta(MetaKind::SetExpressionId(0))),
+            // first anchored expr
+            Opcode::StartSave(InstStartSave::new(0)),
+            Opcode::Consume(InstConsume::new('a')),
+            Opcode::EndSave(InstEndSave::new(0)),
+            Opcode::Match,
+            // unanchored start
+            Opcode::Split(InstSplit::new(InstIndex::from(9), InstIndex::from(7))),
+            Opcode::Any,
+            Opcode::Jmp(InstJmp::new(InstIndex::from(6))),
+            Opcode::Split(InstSplit::new(InstIndex::from(10), InstIndex::from(15))),
+            // first unanchored expr
+            Opcode::Meta(InstMeta(MetaKind::SetExpressionId(1))),
+            Opcode::StartSave(InstStartSave::new(0)),
+            Opcode::Consume(InstConsume::new('b')),
+            Opcode::EndSave(InstEndSave::new(0)),
+            Opcode::Match,
+            // second unanchored expr
+            Opcode::Meta(InstMeta(MetaKind::SetExpressionId(2))),
+            Opcode::StartSave(InstStartSave::new(0)),
+            Opcode::Consume(InstConsume::new('c')),
+            Opcode::EndSave(InstEndSave::new(0)),
+            Opcode::Match,
+        ]);
+
+        // match first expr
+        assert_eq!(
+            Some([SaveGroupSlot::complete(0, 0, 1)]),
+            run::<1>(&prog, "abc")
+        );
+
+        // match second expr
+        assert_eq!(
+            Some([SaveGroupSlot::complete(1, 5, 6)]),
+            run::<1>(&prog, "defalbno")
+        );
+
+        // match third expr
+        assert_eq!(
+            Some([SaveGroupSlot::complete(2, 3, 4)]),
+            run::<1>(&prog, "zxyc")
+        );
+    }
 }

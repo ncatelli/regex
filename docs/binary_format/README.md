@@ -67,3 +67,6 @@ Instructions are defined as n number of descriptors as noted in the [header](#he
 
 ### Match
 ![match](./operations/match.svg)
+
+### Meta
+![meta](./operations/meta.svg)

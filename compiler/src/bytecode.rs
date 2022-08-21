@@ -136,6 +136,7 @@ impl ToBytecode for Opcode {
             Opcode::StartSave(iss) => iss.to_bytecode(),
             Opcode::EndSave(ies) => ies.to_bytecode(),
             Opcode::Match => InstMatch.to_bytecode(),
+            Opcode::Meta(im) => im.to_bytecode(),
         }
     }
 }
@@ -383,6 +384,19 @@ impl ToBytecode for InstMatch {
     fn to_bytecode(&self) -> Self::Output {
         let first = Self::OPCODE_BINARY_REPR.to_le_bytes();
         let second = [0u8; 8];
+
+        OpcodeBytecodeRepr(merge_arrays(first, second))
+    }
+}
+
+impl ToBytecode for InstMeta {
+    type Output = OpcodeBytecodeRepr;
+
+    fn to_bytecode(&self) -> Self::Output {
+        let first = Self::OPCODE_BINARY_REPR.to_le_bytes();
+        let second = match self.0 {
+            MetaKind::SetExpressionId(id) => merge_arrays([0u8; 4], id.to_le_bytes()),
+        };
 
         OpcodeBytecodeRepr(merge_arrays(first, second))
     }

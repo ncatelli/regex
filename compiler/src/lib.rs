@@ -22,7 +22,7 @@
 //! // parsed into an evaluatable program.
 //! let program = parse(pattern)
 //!     .map_err(|e| format!("{:?}", e))
-//!     .and_then(compile).expect("failed to parser or compile");
+//!     .and_then(compile).expect("failed to parse or compile");
 //!
 //! let input = "hello\nworld";
 //!

@@ -377,6 +377,8 @@ fn generate_nested_split_expressions(
     Ok(expr_splits)
 }
 
+/// Takes a slice of expressions, starting at 0 and generates a vector of the
+/// start of each expression from 0.
 fn generate_offsets_from_start(rel_exprs: &[Vec<RelativeOpcode>]) -> Vec<i32> {
     let mut prev = 0;
     let mut offsets_from_start = Vec::with_capacity(rel_exprs.len());

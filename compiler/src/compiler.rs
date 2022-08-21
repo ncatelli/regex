@@ -275,7 +275,7 @@ pub fn compile_many(regex_asts: Vec<ast::Regex>) -> Result<Instructions, String>
         // reset save group id to 0
         let mut save_group_id_counter = 0_usize;
 
-        let expr_id = u32::try_from(expr_id).unwrap();
+        let expr_id = u32::try_from(expr_id).map_err(|e| format!("{:?}", e))?;
 
         // Start
         let mut relative_expression_opcodes =
@@ -307,23 +307,23 @@ pub fn compile_many(regex_asts: Vec<ast::Regex>) -> Result<Instructions, String>
     let has_both_anchored_and_unanchored_segments =
         (unanchored_expression_cnt > 0) && (anchored_expression_cnt > 0);
 
-    let mut offset_stack = generate_offsets_from_start(&anchored)
+    // generate a reverse stack of all expression start offsets then generate routing split operations.
+    let anchored_offset_stack = generate_offsets_from_start(&anchored)
         .into_iter()
         .rev()
         .collect::<Vec<_>>();
+    let anchored_expr_splits = generate_nested_split_expressions(anchored_offset_stack)?;
 
-    let mut anchored_expr_splits = vec![];
-    while offset_stack.len() > 1 {
-        let trailing_splits = i32::try_from(anchored_expr_splits.len()).unwrap();
+    // generate a reverse stack of all expression start offsets then generate routing split operations.
+    let unanchored_expr_splits = generate_nested_split_expressions(
+        unanchored_offsets_from_start_of_exprs
+            .into_iter()
+            .rev()
+            .collect::<Vec<_>>(),
+    )?;
 
-        // safe to unwrap due to above check.
-        let primary_start = offset_stack.pop().unwrap() + trailing_splits + 1;
-        let secondary_start = offset_stack.pop().unwrap() + trailing_splits + 1;
-        anchored_expr_splits.push(RelativeOpcode::Split(primary_start, secondary_start));
-
-        offset_stack.push(secondary_start);
-    }
-
+    // The initial prefix that jumps into the expression routing splits with
+    // a lazy fallover into a consuming `Any` match.
     let unanchored_prefix = vec![
         RelativeOpcode::Split(3, 1),
         RelativeOpcode::Any,
@@ -331,26 +331,11 @@ pub fn compile_many(regex_asts: Vec<ast::Regex>) -> Result<Instructions, String>
         RelativeOpcode::Jmp(-2),
     ];
 
-    let mut offset_stack = unanchored_offsets_from_start_of_exprs
-        .into_iter()
-        .rev()
-        .collect::<Vec<_>>();
-
-    let mut unanchored_expr_splits = vec![];
-    while offset_stack.len() > 1 {
-        let trailing_splits = i32::try_from(unanchored_expr_splits.len()).unwrap();
-
-        // safe to unwrap due to above check.
-        let primary_start = offset_stack.pop().unwrap() + trailing_splits + 1;
-        let secondary_start = offset_stack.pop().unwrap() + trailing_splits + 1;
-        unanchored_expr_splits.push(RelativeOpcode::Split(primary_start, secondary_start));
-
-        offset_stack.push(secondary_start);
-    }
-
+    // existence of unanchored expressions changes the anchored_prefix so this is generated last.
     let anchored_prefix = if has_both_anchored_and_unanchored_segments {
         let start_of_unanchored_exprs =
-            i32::try_from(anchored_expr_splits.len() + anchored_opcode_cnt + 1).unwrap();
+            i32::try_from(anchored_expr_splits.len() + anchored_opcode_cnt + 1)
+                .map_err(|e| e.to_string())?;
 
         vec![RelativeOpcode::Split(1, start_of_unanchored_exprs)]
     } else {
@@ -371,6 +356,29 @@ pub fn compile_many(regex_asts: Vec<ast::Regex>) -> Result<Instructions, String>
     Ok(Instructions::new(sets, opcodes))
 }
 
+/// from a stack of offsets, starting from last expression start first,
+/// generate all `Split` operations to jump to the corresponding offsets.
+fn generate_nested_split_expressions(
+    mut offset_stack: Vec<i32>,
+) -> Result<RelativeOpcodes, String> {
+    let mut expr_splits = vec![];
+
+    while offset_stack.len() > 1 {
+        let trailing_splits = i32::try_from(expr_splits.len()).map_err(|e| e.to_string())?;
+
+        // safe to while loop condition asserting 2 elements are present.
+        let primary_start = offset_stack.pop().unwrap() + trailing_splits + 1;
+        let secondary_start = offset_stack.pop().unwrap() + trailing_splits + 1;
+        expr_splits.push(RelativeOpcode::Split(primary_start, secondary_start));
+
+        offset_stack.push(secondary_start);
+    }
+
+    Ok(expr_splits)
+}
+
+/// Takes a slice of expressions, starting at 0 and generates a vector of the
+/// start of each expression from 0.
 fn generate_offsets_from_start(rel_exprs: &[Vec<RelativeOpcode>]) -> Vec<i32> {
     let mut prev = 0;
     let mut offsets_from_start = Vec::with_capacity(rel_exprs.len());

@@ -47,8 +47,13 @@ pub enum SaveGroupSlot {
     None,
     /// A valid match has been found between the exlusive range of `start..end`.
     Complete {
+        /// Stores the matching expression id. For a single expression program
+        /// this defaults to `0`.
         expression_id: u32,
+        /// The start index of the match.
         start: usize,
+        /// The exclusive index of the match. i.e. if the match first index of
+        /// a one character match is `0` this will be `1`.
         end: usize,
     },
 }

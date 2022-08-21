@@ -31,13 +31,8 @@
 //!     compile(regex_ast)
 //! )
 //! ```
-use std::sync::atomic::{AtomicUsize, Ordering};
-
 use super::ast;
 use regex_runtime::*;
-
-/// Tracks an incrementing identifier for save groups.
-static SAVE_GROUP_ID: AtomicUsize = AtomicUsize::new(0);
 
 /// A internal representation of the `regex_runtime::Opcode` type, with relative
 /// addressing.
@@ -142,16 +137,19 @@ type RelativeOpcodes = Vec<RelativeOpcode>;
 /// )
 /// ```
 pub fn compile(regex_ast: ast::Regex) -> Result<Instructions, String> {
+    let mut save_group_id_counter = 0_usize;
+
     let suffix = [RelativeOpcode::Match];
 
     let (anchored, relative_ops): (bool, Result<RelativeOpcodes, _>) = match regex_ast {
         ast::Regex::StartOfStringAnchored(expr) => (
             true,
-            expression(expr).map(|expr| expr.into_iter().chain(suffix.into_iter()).collect()),
+            expression(&mut save_group_id_counter, expr)
+                .map(|expr| expr.into_iter().chain(suffix.into_iter()).collect()),
         ),
         ast::Regex::Unanchored(expr) => (
             false,
-            expression(expr).map(|expr| {
+            expression(&mut save_group_id_counter, expr).map(|expr| {
                 // match anything
                 let prefix = [
                     RelativeOpcode::Split(3, 1),
@@ -193,6 +191,81 @@ pub fn compile(regex_ast: ast::Regex) -> Result<Instructions, String> {
         })
 }
 
+/// Accepts multiple parsed ASTs and attempts to compile it into a runnable
+/// bytecode program for use with the regex-runtime crate.
+///
+/// This is similar to the `compile` method, with the differencee being the
+/// acceptance of multiple expressions.
+///
+/// # Example
+///
+/// ```
+/// use regex_compiler::ast::*;
+/// use regex_runtime::*;
+/// use regex_compiler::compile_many;
+///
+/// // approximate to `ab`
+/// // approximate to `^(a)`
+/// let regex_ast_anchored =
+///     Regex::StartOfStringAnchored(Expression(vec![SubExpression(vec![
+///         SubExpressionItem::Group(Group::Capturing {
+///             expression: Expression(vec![SubExpression(vec![SubExpressionItem::Match(
+///                 Match::WithoutQuantifier {
+///                     item: MatchItem::MatchCharacter(MatchCharacter(Char('a'))),
+///                 },
+///             )])]),
+///         }),
+///     ])]));
+///
+/// let regex_ast_unanchored = ['b', 'c'].into_iter().map(|c| {
+///     Regex::Unanchored(Expression(vec![SubExpression(vec![
+///         SubExpressionItem::Group(Group::Capturing {
+///             expression: Expression(vec![SubExpression(vec![SubExpressionItem::Match(
+///                 Match::WithoutQuantifier {
+///                     item: MatchItem::MatchCharacter(MatchCharacter(Char(c))),
+///                 },
+///             )])]),
+///         }),
+///     ])]))
+/// });
+///
+/// let all_exprs = [regex_ast_anchored]
+///     .into_iter()
+///     .chain(regex_ast_unanchored)
+///     .collect();
+///
+/// let expected = vec![
+///     Opcode::Split(InstSplit::new(InstIndex::from(1), InstIndex::from(6))),
+///     Opcode::Meta(InstMeta(MetaKind::SetExpressionId(0))),
+///     // first anchored expr
+///     Opcode::StartSave(InstStartSave::new(0)),
+///     Opcode::Consume(InstConsume::new('a')),
+///     Opcode::EndSave(InstEndSave::new(0)),
+///     Opcode::Match,
+///     // unanchored start
+///     Opcode::Split(InstSplit::new(InstIndex::from(9), InstIndex::from(7))),
+///     Opcode::Any,
+///     Opcode::Jmp(InstJmp::new(InstIndex::from(6))),
+///     Opcode::Split(InstSplit::new(InstIndex::from(10), InstIndex::from(15))),
+///     // first unanchored expr
+///     Opcode::Meta(InstMeta(MetaKind::SetExpressionId(1))),
+///     Opcode::StartSave(InstStartSave::new(0)),
+///     Opcode::Consume(InstConsume::new('b')),
+///     Opcode::EndSave(InstEndSave::new(0)),
+///     Opcode::Match,
+///     // second unanchored expr
+///     Opcode::Meta(InstMeta(MetaKind::SetExpressionId(2))),
+///     Opcode::StartSave(InstStartSave::new(0)),
+///     Opcode::Consume(InstConsume::new('c')),
+///     Opcode::EndSave(InstEndSave::new(0)),
+///     Opcode::Match,
+/// ];
+///
+/// assert_eq!(
+///    Ok(Instructions::default().with_opcodes(expected)),
+///    compile_many(all_exprs),
+/// );
+/// ```
 pub fn compile_many(regex_asts: Vec<ast::Regex>) -> Result<Instructions, String> {
     let mut anchored = Vec::with_capacity(regex_asts.len());
     let mut unanchored = Vec::with_capacity(regex_asts.len());
@@ -200,7 +273,7 @@ pub fn compile_many(regex_asts: Vec<ast::Regex>) -> Result<Instructions, String>
     // populate the above lists of anchored and unanchored programs.
     for (expr_id, regex_ast) in regex_asts.into_iter().enumerate() {
         // reset save group id to 0
-        SAVE_GROUP_ID.store(0, Ordering::SeqCst);
+        let mut save_group_id_counter = 0_usize;
 
         let expr_id = u32::try_from(expr_id).unwrap();
 
@@ -210,14 +283,14 @@ pub fn compile_many(regex_asts: Vec<ast::Regex>) -> Result<Instructions, String>
 
         match regex_ast {
             ast::Regex::StartOfStringAnchored(expr) => {
-                let mut generated_opcodes = expression(expr)?;
+                let mut generated_opcodes = expression(&mut save_group_id_counter, expr)?;
                 relative_expression_opcodes.append(&mut generated_opcodes);
                 relative_expression_opcodes.push(RelativeOpcode::Match);
                 anchored.push(relative_expression_opcodes);
             }
 
             ast::Regex::Unanchored(expr) => {
-                let mut generated_opcodes = expression(expr)?;
+                let mut generated_opcodes = expression(&mut save_group_id_counter, expr)?;
                 relative_expression_opcodes.append(&mut generated_opcodes);
                 relative_expression_opcodes.push(RelativeOpcode::Match);
                 unanchored.push(relative_expression_opcodes);
@@ -334,25 +407,31 @@ fn convert_relative_ops_to_absolute_ops(
     (sets, absolute_insts)
 }
 
-fn expression(expr: ast::Expression) -> Result<RelativeOpcodes, String> {
+fn expression(
+    save_group_id_offset: &mut usize,
+    expr: ast::Expression,
+) -> Result<RelativeOpcodes, String> {
     let ast::Expression(subexprs) = expr;
 
     let compiled_subexprs = subexprs
         .into_iter()
-        .map(subexpression)
+        .map(|sub_expr| subexpression(save_group_id_offset, sub_expr))
         .collect::<Result<Vec<_>, _>>()?;
 
     alternations_for_supplied_relative_opcodes(compiled_subexprs)
 }
 
-fn subexpression(subexpr: ast::SubExpression) -> Result<RelativeOpcodes, String> {
+fn subexpression(
+    save_group_id_offset: &mut usize,
+    subexpr: ast::SubExpression,
+) -> Result<RelativeOpcodes, String> {
     let ast::SubExpression(items) = subexpr;
 
     items
         .into_iter()
         .map(|subexpr_item| match subexpr_item {
             ast::SubExpressionItem::Match(m) => match_item(m),
-            ast::SubExpressionItem::Group(g) => group(g),
+            ast::SubExpressionItem::Group(g) => group(save_group_id_offset, g),
             ast::SubExpressionItem::Anchor(a) => anchor(a),
             ast::SubExpressionItem::Backreference(_) => unimplemented!(),
         })
@@ -962,16 +1041,17 @@ fn alternations_for_supplied_relative_opcodes(
 
 // Groups
 
-fn group(g: ast::Group) -> Result<RelativeOpcodes, String> {
+fn group(save_group_id_offset: &mut usize, g: ast::Group) -> Result<RelativeOpcodes, String> {
     use ast::{Integer, Quantifier, QuantifierType};
 
     match g {
         ast::Group::Capturing { expression: expr } => {
-            let save_group_id = SAVE_GROUP_ID.fetch_add(1, Ordering::SeqCst);
+            let save_group_id = *save_group_id_offset;
+            *save_group_id_offset += 1;
             let save_group_prefix = [RelativeOpcode::StartSave(save_group_id)];
             let save_group_suffix = [RelativeOpcode::EndSave(save_group_id)];
 
-            expression(expr).map(|insts| {
+            expression(save_group_id_offset, expr).map(|insts| {
                 save_group_prefix
                     .into_iter()
                     .chain(insts.into_iter())
@@ -983,11 +1063,12 @@ fn group(g: ast::Group) -> Result<RelativeOpcodes, String> {
             expression: expr,
             quantifier,
         } => {
-            let save_group_id = SAVE_GROUP_ID.fetch_add(1, Ordering::SeqCst);
+            let save_group_id = *save_group_id_offset;
+            *save_group_id_offset += 1;
             let save_group_prefix = [RelativeOpcode::StartSave(save_group_id)];
             let save_group_suffix = [RelativeOpcode::EndSave(save_group_id)];
 
-            expression(expr)
+            expression(save_group_id_offset, expr)
                 .map(|rel_ops| match quantifier {
                     Quantifier::Eager(QuantifierType::ZeroOrOne) => {
                         generate_range_quantifier_block!(eager, 0, 1, rel_ops)
@@ -1037,11 +1118,11 @@ fn group(g: ast::Group) -> Result<RelativeOpcodes, String> {
                 })
         }
 
-        ast::Group::NonCapturing { expression: expr } => expression(expr),
+        ast::Group::NonCapturing { expression: expr } => expression(save_group_id_offset, expr),
         ast::Group::NonCapturingWithQuantifier {
             expression: expr,
             quantifier,
-        } => expression(expr).map(|rel_ops| match quantifier {
+        } => expression(save_group_id_offset, expr).map(|rel_ops| match quantifier {
             Quantifier::Eager(QuantifierType::ZeroOrOne) => {
                 generate_range_quantifier_block!(eager, 0, 1, rel_ops)
             }
@@ -1793,9 +1874,6 @@ mod tests {
 
     #[test]
     fn should_compile_capturing_group() {
-        // reset save group id.
-        SAVE_GROUP_ID.store(0, std::sync::atomic::Ordering::SeqCst);
-
         // approximate to `^(a)(b)`
         let regex_ast = Regex::StartOfStringAnchored(Expression(vec![SubExpression(vec![
             SubExpressionItem::Group(Group::Capturing {
@@ -1830,9 +1908,6 @@ mod tests {
 
     #[test]
     fn should_compile_nested_capturing_group() {
-        // reset save group id.
-        SAVE_GROUP_ID.store(0, std::sync::atomic::Ordering::SeqCst);
-
         // approximate to `^(a(b))`
         let regex_ast = Regex::StartOfStringAnchored(Expression(vec![SubExpression(vec![
             SubExpressionItem::Group(Group::Capturing {
@@ -2051,9 +2126,6 @@ mod tests {
         for (id, (quantifier, expected_opcodes)) in
             quantifier_and_expected_opcodes.into_iter().enumerate()
         {
-            // reset the save group id.
-            SAVE_GROUP_ID.store(0, std::sync::atomic::Ordering::SeqCst);
-
             let regex_ast = Regex::StartOfStringAnchored(Expression(vec![SubExpression(vec![
                 SubExpressionItem::Group(Group::Capturing {
                     expression: Expression(vec![SubExpression(vec![SubExpressionItem::Match(
@@ -2285,9 +2357,6 @@ mod tests {
             }),
         ])]));
 
-        // reset the save group id.
-        SAVE_GROUP_ID.store(0, std::sync::atomic::Ordering::SeqCst);
-
         assert_eq!(
             Ok(Instructions::default().with_opcodes(vec![
                 Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
@@ -2332,14 +2401,10 @@ mod tests {
             ])]))
         });
 
-        let all_exprs = // [regex_ast_anchored]
-        [regex_ast_anchored]
+        let all_exprs = [regex_ast_anchored]
             .into_iter()
             .chain(regex_ast_unanchored)
             .collect();
-
-        // reset the save group id.
-        SAVE_GROUP_ID.store(0, std::sync::atomic::Ordering::SeqCst);
 
         let results = compile_many(all_exprs);
         let expected = vec![
@@ -2369,16 +2434,6 @@ mod tests {
             Opcode::Match,
         ];
 
-        assert_eq!(
-            expected.len(),
-            results.as_ref().map(|ops| ops.len()).unwrap_or(0)
-        );
-
-        assert_eq!(
-            &Ok(Instructions::default().with_opcodes(expected)),
-            &results,
-            "{:#?}",
-            &results
-        );
+        assert_eq!(Ok(Instructions::default().with_opcodes(expected)), results,);
     }
 }

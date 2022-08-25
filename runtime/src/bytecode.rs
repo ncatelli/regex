@@ -670,17 +670,27 @@ impl<B: AsRef<[u8]>> FromBytecode<B> for crate::Opcode {
                     .with_data(slot_id.to_string())
                 }),
             (Some(InstMatch::OPCODE_BINARY_REPR), Some(0)) => Ok(Opcode::Match),
-            (Some(InstMeta::OPCODE_BINARY_REPR), Some(operand)) => {
-                let kind = u32::try_from(operand >> 32).map_err(|_| {
-                    BytecodeDeserializationError::new(
-                        BytecodeDeserializationErrorKind::IntegerConversionTo32Bit,
-                    )
-                })?;
-                let kind_oper = u32::try_from(operand & u64::from(u32::MAX)).map_err(|_| {
-                    BytecodeDeserializationError::new(
-                        BytecodeDeserializationErrorKind::IntegerConversionTo32Bit,
-                    )
-                })?;
+            (Some(InstMeta::OPCODE_BINARY_REPR), Some(_)) => {
+                let kind = data
+                    .get(8..12)
+                    .ok_or(())
+                    .and_then(|slice| TryInto::<[u8; 4]>::try_into(slice).map_err(|_| ()))
+                    .map_err(|_| {
+                        BytecodeDeserializationError::new(
+                            BytecodeDeserializationErrorKind::IntegerConversionTo32Bit,
+                        )
+                    })
+                    .map(u32::from_le_bytes)?;
+                let kind_oper = data
+                    .get(12..16)
+                    .ok_or(())
+                    .and_then(|slice| TryInto::<[u8; 4]>::try_into(slice).map_err(|_| ()))
+                    .map_err(|_| {
+                        BytecodeDeserializationError::new(
+                            BytecodeDeserializationErrorKind::IntegerConversionTo32Bit,
+                        )
+                    })
+                    .map(u32::from_le_bytes)?;
                 match kind {
                     0 => Ok(Opcode::Meta(InstMeta::new(MetaKind::SetExpressionId(
                         kind_oper,
@@ -796,7 +806,7 @@ mod tests {
                 Ok(Opcode::Match),
             ),
             (
-                [10, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 0, 0, 0, 0, 0, 0],
+                [10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 0, 0],
                 Ok(Opcode::Meta(InstMeta::new(MetaKind::SetExpressionId(
                     u32::from(u16::MAX),
                 )))),

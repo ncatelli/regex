@@ -53,6 +53,8 @@ pub enum BytecodeDeserializationErrorKind {
     CharacterAlphabetVariantOutOfRange,
     /// Fast-forward byte exceeds the allowable range of 0-2.
     FastForwardVariantOutOfRange,
+    /// A valid opcode has been provided but with an invalid operand.
+    InvalidOperand,
 }
 
 /// Represents all error types that may _expectedly_ occur during
@@ -130,6 +132,9 @@ impl std::fmt::Display for BytecodeDeserializationError {
                 write!(f, "fast-forward variant {}{}out of range", data, padding)
             }
             BytecodeDeserializationErrorKind::InvalidOpcode => write!(f, "unknown opcode {}", data),
+            BytecodeDeserializationErrorKind::InvalidOperand => {
+                write!(f, "invalid operand {}", data)
+            }
         }
     }
 }
@@ -665,6 +670,27 @@ impl<B: AsRef<[u8]>> FromBytecode<B> for crate::Opcode {
                     .with_data(slot_id.to_string())
                 }),
             (Some(InstMatch::OPCODE_BINARY_REPR), Some(0)) => Ok(Opcode::Match),
+            (Some(InstMeta::OPCODE_BINARY_REPR), Some(operand)) => {
+                let kind = u32::try_from(operand >> 32).map_err(|_| {
+                    BytecodeDeserializationError::new(
+                        BytecodeDeserializationErrorKind::IntegerConversionTo32Bit,
+                    )
+                })?;
+                let kind_oper = u32::try_from(operand & u64::from(u32::MAX)).map_err(|_| {
+                    BytecodeDeserializationError::new(
+                        BytecodeDeserializationErrorKind::IntegerConversionTo32Bit,
+                    )
+                })?;
+                match kind {
+                    0 => Ok(Opcode::Meta(InstMeta::new(MetaKind::SetExpressionId(
+                        kind_oper,
+                    )))),
+                    other => Err(BytecodeDeserializationError::new(
+                        BytecodeDeserializationErrorKind::InvalidOperand,
+                    )
+                    .with_data(format!("{}", other))),
+                }
+            }
             (Some(other_opcode), Some(_)) => Err(BytecodeDeserializationError::new(
                 BytecodeDeserializationErrorKind::InvalidOpcode,
             )
@@ -768,6 +794,12 @@ mod tests {
             (
                 [9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
                 Ok(Opcode::Match),
+            ),
+            (
+                [10, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 0, 0, 0, 0, 0, 0],
+                Ok(Opcode::Meta(InstMeta::new(MetaKind::SetExpressionId(
+                    u32::from(u16::MAX),
+                )))),
             ),
         ];
 

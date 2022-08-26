@@ -2505,4 +2505,89 @@ mod tests {
             &results
         );
     }
+
+    #[test]
+    fn should_compile_many_unanchored_and_anchored_exprs() {
+        let anchored_ast = ['a', 'b', 'c'].into_iter().map(|c| {
+            Regex::StartOfStringAnchored(Expression(vec![SubExpression(vec![
+                SubExpressionItem::Group(Group::Capturing {
+                    expression: Expression(vec![SubExpression(vec![SubExpressionItem::Match(
+                        Match::WithoutQuantifier {
+                            item: MatchItem::MatchCharacter(MatchCharacter(Char(c))),
+                        },
+                    )])]),
+                }),
+            ])]))
+        });
+
+        let unanchored_ast = ['x', 'y', 'z'].into_iter().map(|c| {
+            Regex::Unanchored(Expression(vec![SubExpression(vec![
+                SubExpressionItem::Group(Group::Capturing {
+                    expression: Expression(vec![SubExpression(vec![SubExpressionItem::Match(
+                        Match::WithoutQuantifier {
+                            item: MatchItem::MatchCharacter(MatchCharacter(Char(c))),
+                        },
+                    )])]),
+                }),
+            ])]))
+        });
+
+        let expr_asts = anchored_ast.chain(unanchored_ast).collect();
+
+        let results = compile_many(expr_asts);
+        let expected = vec![
+            Opcode::Split(InstSplit::new(InstIndex::from(1), InstIndex::from(18))),
+            Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(2))),
+            Opcode::Split(InstSplit::new(InstIndex::from(8), InstIndex::from(13))),
+            // first anchored expr
+            Opcode::Meta(InstMeta(MetaKind::SetExpressionId(0))),
+            Opcode::StartSave(InstStartSave::new(0)),
+            Opcode::Consume(InstConsume::new('a')),
+            Opcode::EndSave(InstEndSave::new(0)),
+            Opcode::Match,
+            // second anchored expr
+            Opcode::Meta(InstMeta(MetaKind::SetExpressionId(1))),
+            Opcode::StartSave(InstStartSave::new(0)),
+            Opcode::Consume(InstConsume::new('b')),
+            Opcode::EndSave(InstEndSave::new(0)),
+            Opcode::Match,
+            // third anchored expr
+            Opcode::Meta(InstMeta(MetaKind::SetExpressionId(2))),
+            Opcode::StartSave(InstStartSave::new(0)),
+            Opcode::Consume(InstConsume::new('c')),
+            Opcode::EndSave(InstEndSave::new(0)),
+            Opcode::Match,
+            // start of unanchored exprs
+            Opcode::Split(InstSplit::new(InstIndex::from(21), InstIndex::from(19))),
+            Opcode::Any,
+            Opcode::Jmp(InstJmp::new(InstIndex::from(18))),
+            Opcode::Split(InstSplit::new(InstIndex::from(23), InstIndex::from(22))),
+            Opcode::Split(InstSplit::new(InstIndex::from(28), InstIndex::from(33))),
+            // first unanchored expr
+            Opcode::Meta(InstMeta(MetaKind::SetExpressionId(3))),
+            Opcode::StartSave(InstStartSave::new(0)),
+            Opcode::Consume(InstConsume::new('x')),
+            Opcode::EndSave(InstEndSave::new(0)),
+            Opcode::Match,
+            // second unanchored expr
+            Opcode::Meta(InstMeta(MetaKind::SetExpressionId(4))),
+            Opcode::StartSave(InstStartSave::new(0)),
+            Opcode::Consume(InstConsume::new('y')),
+            Opcode::EndSave(InstEndSave::new(0)),
+            Opcode::Match,
+            // third unanchored expr
+            Opcode::Meta(InstMeta(MetaKind::SetExpressionId(5))),
+            Opcode::StartSave(InstStartSave::new(0)),
+            Opcode::Consume(InstConsume::new('z')),
+            Opcode::EndSave(InstEndSave::new(0)),
+            Opcode::Match,
+        ];
+
+        assert_eq!(
+            &Ok(Instructions::default().with_opcodes(expected)),
+            &results,
+            "{:#?}",
+            &results
+        );
+    }
 }

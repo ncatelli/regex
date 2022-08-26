@@ -2517,4 +2517,120 @@ mod tests {
             run::<1>(&prog, "zxyc")
         );
     }
+
+    #[test]
+    fn should_evaluate_multi_unanchored_expression_program() {
+        let prog = Instructions::default().with_opcodes(vec![
+            Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
+            Opcode::Any,
+            Opcode::Jmp(InstJmp::new(InstIndex::from(0))),
+            Opcode::Split(InstSplit::new(InstIndex::from(5), InstIndex::from(4))),
+            Opcode::Split(InstSplit::new(InstIndex::from(10), InstIndex::from(15))),
+            // first expr
+            Opcode::Meta(InstMeta(MetaKind::SetExpressionId(0))),
+            Opcode::StartSave(InstStartSave::new(0)),
+            Opcode::Consume(InstConsume::new('a')),
+            Opcode::EndSave(InstEndSave::new(0)),
+            Opcode::Match,
+            // second expr
+            Opcode::Meta(InstMeta(MetaKind::SetExpressionId(1))),
+            Opcode::StartSave(InstStartSave::new(0)),
+            Opcode::Consume(InstConsume::new('b')),
+            Opcode::EndSave(InstEndSave::new(0)),
+            Opcode::Match,
+            // third expr
+            Opcode::Meta(InstMeta(MetaKind::SetExpressionId(2))),
+            Opcode::StartSave(InstStartSave::new(0)),
+            Opcode::Consume(InstConsume::new('c')),
+            Opcode::EndSave(InstEndSave::new(0)),
+            Opcode::Match,
+        ]);
+
+        // match first expr
+        assert_eq!(
+            Some([SaveGroupSlot::complete(0, 3, 4)]),
+            run::<1>(&prog, "zxya")
+        );
+
+        // match second expr
+        assert_eq!(
+            Some([SaveGroupSlot::complete(1, 3, 4)]),
+            run::<1>(&prog, "zxyb")
+        );
+
+        // match third expr
+        assert_eq!(
+            Some([SaveGroupSlot::complete(2, 3, 4)]),
+            run::<1>(&prog, "zxyc")
+        );
+    }
+
+    #[test]
+    fn should_evaluate_multi_expression_with_multiple_splits_program() {
+        let prog = Instructions::default().with_opcodes(vec![
+            Opcode::Split(InstSplit::new(InstIndex::from(1), InstIndex::from(18))),
+            Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(2))),
+            Opcode::Split(InstSplit::new(InstIndex::from(8), InstIndex::from(13))),
+            // first anchored expr
+            Opcode::Meta(InstMeta(MetaKind::SetExpressionId(0))),
+            Opcode::StartSave(InstStartSave::new(0)),
+            Opcode::Consume(InstConsume::new('a')),
+            Opcode::EndSave(InstEndSave::new(0)),
+            Opcode::Match,
+            // second anchored expr
+            Opcode::Meta(InstMeta(MetaKind::SetExpressionId(1))),
+            Opcode::StartSave(InstStartSave::new(0)),
+            Opcode::Consume(InstConsume::new('b')),
+            Opcode::EndSave(InstEndSave::new(0)),
+            Opcode::Match,
+            // third anchored expr
+            Opcode::Meta(InstMeta(MetaKind::SetExpressionId(2))),
+            Opcode::StartSave(InstStartSave::new(0)),
+            Opcode::Consume(InstConsume::new('c')),
+            Opcode::EndSave(InstEndSave::new(0)),
+            Opcode::Match,
+            // start of unanchored exprs
+            Opcode::Split(InstSplit::new(InstIndex::from(21), InstIndex::from(19))),
+            Opcode::Any,
+            Opcode::Jmp(InstJmp::new(InstIndex::from(18))),
+            Opcode::Split(InstSplit::new(InstIndex::from(23), InstIndex::from(22))),
+            Opcode::Split(InstSplit::new(InstIndex::from(28), InstIndex::from(33))),
+            // first unanchored expr
+            Opcode::Meta(InstMeta(MetaKind::SetExpressionId(3))),
+            Opcode::StartSave(InstStartSave::new(0)),
+            Opcode::Consume(InstConsume::new('x')),
+            Opcode::EndSave(InstEndSave::new(0)),
+            Opcode::Match,
+            // second unanchored expr
+            Opcode::Meta(InstMeta(MetaKind::SetExpressionId(4))),
+            Opcode::StartSave(InstStartSave::new(0)),
+            Opcode::Consume(InstConsume::new('y')),
+            Opcode::EndSave(InstEndSave::new(0)),
+            Opcode::Match,
+            // third unanchored expr
+            Opcode::Meta(InstMeta(MetaKind::SetExpressionId(5))),
+            Opcode::StartSave(InstStartSave::new(0)),
+            Opcode::Consume(InstConsume::new('z')),
+            Opcode::EndSave(InstEndSave::new(0)),
+            Opcode::Match,
+        ]);
+
+        // match first expr
+        let expected_match_for_input = [
+            (SaveGroupSlot::complete(0, 0, 1), "abcxyz"),
+            (SaveGroupSlot::complete(0, 0, 1), "abcxyz"),
+            (SaveGroupSlot::complete(1, 0, 1), "bacxyz"),
+            (SaveGroupSlot::complete(2, 0, 1), "cabxyz"),
+            (SaveGroupSlot::complete(3, 3, 4), "stuxyz"),
+            (SaveGroupSlot::complete(4, 3, 4), "stuyxz"),
+            (SaveGroupSlot::complete(5, 3, 4), "stuzxy"),
+        ];
+
+        for (test_id, (expected_match, input)) in expected_match_for_input.into_iter().enumerate() {
+            assert_eq!(
+                (test_id, Some([expected_match])),
+                (test_id, run::<1>(&prog, input))
+            );
+        }
+    }
 }

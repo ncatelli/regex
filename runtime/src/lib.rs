@@ -2517,4 +2517,51 @@ mod tests {
             run::<1>(&prog, "zxyc")
         );
     }
+
+    #[test]
+    fn should_evaluate_multi_expression_unanchored_program() {
+        let prog = Instructions::default().with_opcodes(vec![
+            Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
+            Opcode::Any,
+            Opcode::Jmp(InstJmp::new(InstIndex::from(0))),
+            Opcode::Split(InstSplit::new(InstIndex::from(5), InstIndex::from(4))),
+            Opcode::Split(InstSplit::new(InstIndex::from(10), InstIndex::from(15))),
+            // first expr
+            Opcode::Meta(InstMeta(MetaKind::SetExpressionId(0))),
+            Opcode::StartSave(InstStartSave::new(0)),
+            Opcode::Consume(InstConsume::new('a')),
+            Opcode::EndSave(InstEndSave::new(0)),
+            Opcode::Match,
+            // second expr
+            Opcode::Meta(InstMeta(MetaKind::SetExpressionId(1))),
+            Opcode::StartSave(InstStartSave::new(0)),
+            Opcode::Consume(InstConsume::new('b')),
+            Opcode::EndSave(InstEndSave::new(0)),
+            Opcode::Match,
+            // third expr
+            Opcode::Meta(InstMeta(MetaKind::SetExpressionId(2))),
+            Opcode::StartSave(InstStartSave::new(0)),
+            Opcode::Consume(InstConsume::new('c')),
+            Opcode::EndSave(InstEndSave::new(0)),
+            Opcode::Match,
+        ]);
+
+        // match first expr
+        assert_eq!(
+            Some([SaveGroupSlot::complete(0, 3, 4)]),
+            run::<1>(&prog, "zxya")
+        );
+
+        // match second expr
+        assert_eq!(
+            Some([SaveGroupSlot::complete(1, 3, 4)]),
+            run::<1>(&prog, "zxyb")
+        );
+
+        // match third expr
+        assert_eq!(
+            Some([SaveGroupSlot::complete(2, 3, 4)]),
+            run::<1>(&prog, "zxyc")
+        );
+    }
 }

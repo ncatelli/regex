@@ -25,13 +25,13 @@ use parcel::prelude::v1::*;
 
 use super::ast;
 
-#[derive(PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum ParseErrKind {
     InvalidRegex,
     Other,
 }
 
-impl std::fmt::Debug for ParseErrKind {
+impl std::fmt::Display for ParseErrKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Other => write!(f, "undefined parse error"),
@@ -42,7 +42,7 @@ impl std::fmt::Debug for ParseErrKind {
 
 /// Represents an error stemming from parsing of an input string into a regex
 /// AST.
-#[derive(PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct ParseErr {
     kind: ParseErrKind,
     data: Option<String>,
@@ -61,18 +61,12 @@ impl ParseErr {
     }
 }
 
-impl std::fmt::Debug for ParseErr {
+impl std::fmt::Display for ParseErr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.data {
-            Some(data) => write!(f, "{:?}: {}", &self.kind, data),
-            None => write!(f, "{:?}", &self.kind),
+            Some(data) => write!(f, "{}: {}", &self.kind, data),
+            None => write!(f, "{}", &self.kind),
         }
-    }
-}
-
-impl ToString for ParseErr {
-    fn to_string(&self) -> String {
-        format!("{:?}", self)
     }
 }
 

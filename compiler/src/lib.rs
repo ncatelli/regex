@@ -53,4 +53,4 @@ pub mod parser;
 
 pub use bytecode::to_binary;
 pub use compiler::{compile, compile_many};
-pub use parser::{parse, ParseErr};
+pub use parser::{parse, ParseErr, ParseErrKind};

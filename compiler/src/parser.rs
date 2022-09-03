@@ -25,20 +25,54 @@ use parcel::prelude::v1::*;
 
 use super::ast;
 
+#[derive(PartialEq, Eq)]
+pub enum ParseErrKind {
+    InvalidRegex,
+    Other,
+}
+
+impl std::fmt::Debug for ParseErrKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Other => write!(f, "undefined parse error"),
+            Self::InvalidRegex => write!(f, "provided regex is invalid",),
+        }
+    }
+}
+
 /// Represents an error stemming from parsing of an input string into a regex
 /// AST.
 #[derive(PartialEq, Eq)]
-pub enum ParseErr {
-    InvalidRegex,
-    Undefined(String),
+pub struct ParseErr {
+    kind: ParseErrKind,
+    data: Option<String>,
+}
+
+impl ParseErr {
+    pub fn new(kind: ParseErrKind) -> Self {
+        Self { kind, data: None }
+    }
+
+    pub fn with_data(self, data: String) -> Self {
+        Self {
+            kind: self.kind,
+            data: Some(data),
+        }
+    }
 }
 
 impl std::fmt::Debug for ParseErr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Undefined(err) => write!(f, "undefined parse error: {}", err),
-            Self::InvalidRegex => write!(f, "provided regex is invalid",),
+        match &self.data {
+            Some(data) => write!(f, "{:?}: {}", &self.kind, data),
+            None => write!(f, "{:?}", &self.kind),
         }
+    }
+}
+
+impl ToString for ParseErr {
+    fn to_string(&self) -> String {
+        format!("{:?}", self)
     }
 }
 
@@ -94,10 +128,10 @@ pub fn parse<S: AsRef<str>>(input: S) -> Result<ast::Regex, ParseErr> {
 pub fn parse_enumerated_slice(input: &[(usize, char)]) -> Result<ast::Regex, ParseErr> {
     regex()
         .parse(input)
-        .map_err(|err| ParseErr::Undefined(format!("unspecified parse error occured: {}", err)))
+        .map_err(|err| ParseErr::new(ParseErrKind::Other).with_data(err))
         .and_then(|ms| match ms {
             MatchStatus::Match { inner, .. } => Ok(inner),
-            MatchStatus::NoMatch(..) => Err(ParseErr::InvalidRegex),
+            MatchStatus::NoMatch(..) => Err(ParseErr::new(ParseErrKind::InvalidRegex)),
         })
 }
 

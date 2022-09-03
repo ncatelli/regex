@@ -27,7 +27,7 @@ use super::ast;
 
 /// Represents an error stemming from parsing of an input string into a regex
 /// AST.
-#[derive(PartialEq)]
+#[derive(PartialEq, Eq)]
 pub enum ParseErr {
     InvalidRegex,
     Undefined(String),

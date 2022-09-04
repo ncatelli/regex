@@ -228,7 +228,7 @@ impl<const SG: usize> Default for Threads<SG> {
 
 /// Representative the first consuming match that the runtime can fast-forward
 /// to in an input.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum FastForward {
     /// Represents a single character.
     Char(char),
@@ -247,7 +247,7 @@ impl Default for FastForward {
 /// Represents a runtime program, consisting of all character sets referenced
 /// in an evaluation, all instructions in the program and whether the runtime
 /// can fast-forward through an input.
-#[derive(Default, Debug, PartialEq)]
+#[derive(Default, Debug, PartialEq, Eq)]
 pub struct Instructions {
     pub sets: Vec<CharacterSet>,
     pub program: Vec<Instruction>,
@@ -429,7 +429,7 @@ impl std::ops::Add<Self> for InstIndex {
 pub struct OpcodeBytecodeRepr(pub [u8; 16]);
 
 /// A runtime instruction, containing an offset and a corresponding instruction.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Instruction {
     // A unique identifier for a given instruction
     pub offset: usize,
@@ -485,7 +485,7 @@ impl Display for Instruction {
 }
 
 /// An enum representation of the runtime's operation set.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Opcode {
     /// A consume operation, matching any character.
     Any,
@@ -563,7 +563,7 @@ impl Display for Opcode {
 }
 
 /// A concrete representation of the Any Opcode.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct InstAny;
 
 impl InstAny {
@@ -588,7 +588,7 @@ impl Display for InstAny {
 }
 
 /// A concrete representation of the Consume Opcode.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstConsume {
     /// An expected unicode character required to match.
     pub value: char,
@@ -642,7 +642,7 @@ pub trait CharacterSetRepresentable: Into<CharacterSet> {}
 
 /// Representing a runtime-dispatchable set of characters by associating a sets
 /// membership to a character alphabet.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CharacterSet {
     pub membership: SetMembership,
     pub set: CharacterAlphabet,
@@ -696,7 +696,7 @@ impl CharacterRangeSetVerifiable for CharacterSet {
 }
 
 /// Represents a runtime dispatchable set of characters.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CharacterAlphabet {
     /// Represents a range of values i.e. `0-9`, `a-z`, `A-Z`, etc...
     Range(std::ops::RangeInclusive<char>),
@@ -887,7 +887,7 @@ pub enum SetMembership {
 /// ConsumeSet provides richer matching patterns than the more constrained
 /// Consume or Any instructions allowing for the matching from a set of
 /// characters. This functions as a brevity tool to prevent long alternations.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstConsumeSet {
     /// A offset id to a predefined set in the current program.
     pub idx: usize,
@@ -926,7 +926,7 @@ pub enum EpsilonCond {
 }
 
 /// An internal representation of an `Epsilon` opcode.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstEpsilon {
     pub cond: EpsilonCond,
 }
@@ -957,7 +957,7 @@ impl Display for InstEpsilon {
 }
 
 /// An internal representation of the `Split` opcode.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstSplit {
     pub x_branch: InstIndex,
     pub y_branch: InstIndex,
@@ -989,7 +989,7 @@ impl Display for InstSplit {
 }
 
 /// An internal representation of the `Jmp` opcode.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstJmp {
     pub next: InstIndex,
 }
@@ -1010,7 +1010,7 @@ impl Display for InstJmp {
 }
 
 /// An internal representation of the `StartSave` opcode.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstStartSave {
     pub slot_id: usize,
 }
@@ -1032,7 +1032,7 @@ impl Display for InstStartSave {
 }
 
 /// An internal representation of the `EndSave` opcode.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstEndSave {
     pub slot_id: usize,
 }
@@ -1054,7 +1054,7 @@ impl Display for InstEndSave {
 }
 
 /// An internal representation of the `Match` opcode.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct InstMatch;
 
 impl InstMatch {
@@ -1068,7 +1068,7 @@ impl Display for InstMatch {
 }
 
 /// An internal representation of the `Meta` opcode.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstMeta(pub MetaKind);
 
 impl InstMeta {
@@ -1088,7 +1088,7 @@ impl Display for InstMeta {
 }
 
 /// Represents the kind of Metadata operation to trigger.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MetaKind {
     /// Sets expression id on a thread. This _ONLY_ comes into play in
     /// multi-expression runs.

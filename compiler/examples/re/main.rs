@@ -26,7 +26,7 @@ fn main() -> Result<(), String> {
     }?;
 
     let program = parse(pattern)
-        .map_err(|e| format!("{:?}", e))
+        .map_err(|e| e.to_string())
         .and_then(compile)?;
 
     if debug {

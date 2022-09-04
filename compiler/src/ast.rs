@@ -103,7 +103,7 @@ pub struct GroupNonCapturingModifier;
 // Matchers
 
 /// A consuming match consuming against a few match cases defined from its MatchItem.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Match {
     /// A quantified match, ex: `a*`.
     WithQuantifier {
@@ -118,7 +118,7 @@ impl SubExpressionItemConvertible for Match {}
 
 /// The inner representation of a match.
 #[allow(clippy::enum_variant_names)]
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum MatchItem {
     /// Represents any unicode character, ex: `.`.
     MatchAnyCharacter,
@@ -158,7 +158,7 @@ impl MatchItemConvertible for MatchAnyCharacter {}
 
 /// Represents a character class match.
 #[allow(clippy::enum_variant_names)]
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum MatchCharacterClass {
     /// A group, or set, of characters, `[0-9]` or `[abcd]`.
     CharacterGroup(CharacterGroup),
@@ -192,14 +192,14 @@ impl From<CharacterClassFromUnicodeCategory> for MatchCharacterClass {
 }
 
 /// Represents a consuming match against a single unicode character.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct MatchCharacter(pub Char);
 impl MatchItemConvertible for MatchCharacter {}
 
 // Character Classes
 
 /// A set of characters or groups to match against.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum CharacterGroup {
     /// Represents that the matching set is exclusive of the defined group
     /// items, ex: `[^abcd]`
@@ -216,7 +216,7 @@ pub struct CharacterGroupNegativeModifier;
 
 /// The inner representation of a character group.
 #[allow(clippy::enum_variant_names)]
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum CharacterGroupItem {
     /// A character class, `\d` or `\w`.
     CharacterClass(CharacterClass),
@@ -262,7 +262,7 @@ impl From<Char> for CharacterGroupItem {
 
 /// A Regex character class.
 #[allow(clippy::enum_variant_names)]
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum CharacterClass {
     /// An any word match, `\w`.
     AnyWord,
@@ -321,14 +321,14 @@ pub struct CharacterClassAnyDecimalDigitInverted;
 impl CharacterClassConvertible for CharacterClassAnyDecimalDigitInverted {}
 
 /// Represents a unicode category character class.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct CharacterClassFromUnicodeCategory(pub UnicodeCategoryName);
 impl MatchCharacterClassConvertible for CharacterClassFromUnicodeCategory {}
 impl CharacterGroupItemConvertible for CharacterClassFromUnicodeCategory {}
 
 /// An enum representation of possible Unicode General Categories specifiable
 /// in the unicode category character class matchers.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum UnicodeCategoryName {
     Letter,
     LowercaseLetter,
@@ -396,7 +396,7 @@ impl CharacterGroupItemConvertible for CharacterRange {}
 /// - {2}
 /// - {2,4}
 /// - {2,}
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Quantifier {
     /// Represents an eager quantifier, ex. `*`.
     Eager(QuantifierType),
@@ -409,7 +409,7 @@ pub enum Quantifier {
 pub trait IsQuantifierType: Into<QuantifierType> {}
 
 /// Represents all variants of quantifier types
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum QuantifierType {
     /// Represents a quantifier matching a specified exact number of elements.
     /// Represented by the `{n}` quantifier where `n` is a positive integer.
@@ -538,7 +538,7 @@ pub struct StartOfStringAnchor;
 pub trait AnchorConvertible: Into<Anchor> {}
 
 /// An Anchor element in the AST containing both anchor and boundary elements.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Anchor {
     /// A word boundary, ex. `\b`.
     WordBoundary,
@@ -631,7 +631,7 @@ impl AnchorConvertible for AnchorEndOfString {}
 // Terminals
 
 /// Representative of a positive integer in ast.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct Integer(pub usize);
 
@@ -648,7 +648,7 @@ impl From<Integer> for usize {
 }
 
 /// Represents one or more unicode characters.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct Letters(pub Vec<char>);
 
@@ -665,7 +665,7 @@ impl AsRef<[char]> for Letters {
 }
 
 /// Represents a single unicode character.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct Char(pub char);
 impl CharacterGroupItemConvertible for Char {}

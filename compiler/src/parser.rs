@@ -25,19 +25,55 @@ use parcel::prelude::v1::*;
 
 use super::ast;
 
-/// Represents an error stemming from parsing of an input string into a regex
-/// AST.
-#[derive(PartialEq)]
-pub enum ParseErr {
+#[derive(Debug, PartialEq, Eq)]
+pub enum ParseErrKind {
+    /// Represents an invalid expression,
     InvalidRegex,
-    Undefined(String),
+    /// Represents all other errors.
+    Other,
 }
 
-impl std::fmt::Debug for ParseErr {
+impl std::fmt::Display for ParseErrKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Undefined(err) => write!(f, "undefined parse error: {}", err),
+            Self::Other => write!(f, "undefined parse error"),
             Self::InvalidRegex => write!(f, "provided regex is invalid",),
+        }
+    }
+}
+
+/// Represents an error stemming from parsing of an input string into a regex
+/// AST.
+#[derive(Debug, PartialEq, Eq)]
+pub struct ParseErr {
+    kind: ParseErrKind,
+    data: Option<String>,
+}
+
+impl ParseErr {
+    /// Instantiates a new error with an error kind
+    pub fn new(kind: ParseErrKind) -> Self {
+        Self { kind, data: None }
+    }
+
+    /// Assigns contextual data in `String` format to the error.
+    pub fn with_data_mut(&mut self, data: String) {
+        self.data = Some(data);
+    }
+
+    /// Add additional contextual data in `String` format, consuming the
+    /// original error and returning a new error with the data.
+    pub fn with_data(mut self, data: String) -> Self {
+        self.with_data_mut(data);
+        self
+    }
+}
+
+impl std::fmt::Display for ParseErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.data {
+            Some(data) => write!(f, "{}: {}", &self.kind, data),
+            None => write!(f, "{}", &self.kind),
         }
     }
 }
@@ -94,10 +130,10 @@ pub fn parse<S: AsRef<str>>(input: S) -> Result<ast::Regex, ParseErr> {
 pub fn parse_enumerated_slice(input: &[(usize, char)]) -> Result<ast::Regex, ParseErr> {
     regex()
         .parse(input)
-        .map_err(|err| ParseErr::Undefined(format!("unspecified parse error occured: {}", err)))
+        .map_err(|err| ParseErr::new(ParseErrKind::Other).with_data(err))
         .and_then(|ms| match ms {
             MatchStatus::Match { inner, .. } => Ok(inner),
-            MatchStatus::NoMatch(..) => Err(ParseErr::InvalidRegex),
+            MatchStatus::NoMatch(..) => Err(ParseErr::new(ParseErrKind::InvalidRegex)),
         })
 }
 

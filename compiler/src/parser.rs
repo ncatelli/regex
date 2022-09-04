@@ -27,7 +27,9 @@ use super::ast;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum ParseErrKind {
+    /// Represents an invalid expression,
     InvalidRegex,
+    /// Represents all other errors.
     Other,
 }
 
@@ -49,15 +51,21 @@ pub struct ParseErr {
 }
 
 impl ParseErr {
+    /// Instantiates a new error with an error kind
     pub fn new(kind: ParseErrKind) -> Self {
         Self { kind, data: None }
     }
 
-    pub fn with_data(self, data: String) -> Self {
-        Self {
-            kind: self.kind,
-            data: Some(data),
-        }
+    /// Assigns contextual data in `String` format to the error.
+    pub fn with_data_mut(&mut self, data: String) {
+        self.data = Some(data);
+    }
+
+    /// Add additional contextual data in `String` format, consuming the
+    /// original error and returning a new error with the data.
+    pub fn with_data(mut self, data: String) -> Self {
+        self.with_data_mut(data);
+        self
     }
 }
 

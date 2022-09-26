@@ -20,7 +20,7 @@ jobs:
           clean: false
       - uses: dtolnay/rust-toolchain@stable
       - name: measure benchmarks on branch
-      - run: cargo bench 
+        run: cargo bench 
       - name: upload benchmark report
         uses: actions/upload-artifact@v1
         with:

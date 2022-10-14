@@ -109,10 +109,8 @@ where
     NODE: Clone + Hash + Eq,
     Edge: Clone + Eq,
 {
-    fn adjacency_table_mut(
-        &mut self,
-    ) -> &mut HashMap<NODE, Vec<DirectedEdgeDestination<NODE, Edge>>>;
-    fn adjacency_table(&self) -> &HashMap<NODE, Vec<DirectedEdgeDestination<NODE, Edge>>>;
+    fn adjacent_mut(&mut self) -> &mut HashMap<NODE, Vec<DirectedEdgeDestination<NODE, Edge>>>;
+    fn adjacent(&self) -> &HashMap<NODE, Vec<DirectedEdgeDestination<NODE, Edge>>>;
     fn add_node(&mut self, node: &NODE) -> bool;
     fn add_edge(&mut self, edge: DirectedEdge<NODE, Edge>);
     fn neighbours(
@@ -159,20 +157,18 @@ where
     NODE: Clone + Hash + Eq,
     EDGEVAL: Clone + Eq,
 {
-    fn adjacency_table_mut(
-        &mut self,
-    ) -> &mut HashMap<NODE, Vec<DirectedEdgeDestination<NODE, EDGEVAL>>> {
+    fn adjacent_mut(&mut self) -> &mut HashMap<NODE, Vec<DirectedEdgeDestination<NODE, EDGEVAL>>> {
         &mut self.adjacency_table
     }
 
-    fn adjacency_table(&self) -> &HashMap<NODE, Vec<DirectedEdgeDestination<NODE, EDGEVAL>>> {
+    fn adjacent(&self) -> &HashMap<NODE, Vec<DirectedEdgeDestination<NODE, EDGEVAL>>> {
         &self.adjacency_table
     }
 
     fn add_node(&mut self, node: &NODE) -> bool {
-        match self.adjacency_table().get(node) {
+        match self.adjacent().get(node) {
             None => {
-                self.adjacency_table_mut().insert(node.clone(), Vec::new());
+                self.adjacent_mut().insert(node.clone(), Vec::new());
                 true
             }
             _ => false,
@@ -185,35 +181,33 @@ where
         self.add_node(src);
         self.add_node(dest);
 
-        self.adjacency_table_mut()
-            .entry(src.clone())
-            .and_modify(|e| {
-                let ded = DirectedEdgeDestination::new(dest.clone(), edge_value.clone());
-                e.push(ded);
-            });
+        self.adjacent_mut().entry(src.clone()).and_modify(|e| {
+            let ded = DirectedEdgeDestination::new(dest.clone(), edge_value.clone());
+            e.push(ded);
+        });
     }
 
     fn neighbours(
         &self,
         node: &NODE,
     ) -> Result<&Vec<DirectedEdgeDestination<NODE, EDGEVAL>>, GraphError> {
-        match self.adjacency_table().get(node) {
+        match self.adjacent().get(node) {
             None => Err(GraphError::new(GraphErrorKind::NodeUndefined)),
             Some(i) => Ok(i),
         }
     }
 
     fn contains(&self, node: &NODE) -> bool {
-        self.adjacency_table().get(node).is_some()
+        self.adjacent().get(node).is_some()
     }
 
     fn nodes(&self) -> Vec<&NODE> {
-        self.adjacency_table().keys().collect()
+        self.adjacent().keys().collect()
     }
 
     fn edges(&self) -> Vec<DirectedEdge<NODE, EDGEVAL>> {
         let mut edges = Vec::new();
-        for (from_node, from_node_neighbours) in self.adjacency_table() {
+        for (from_node, from_node_neighbours) in self.adjacent() {
             let destination_tuple_iter = from_node_neighbours
                 .iter()
                 .map(|edge_dest| (&edge_dest.dest, &edge_dest.edge_value));

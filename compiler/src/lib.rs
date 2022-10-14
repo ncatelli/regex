@@ -49,6 +49,7 @@
 pub mod ast;
 pub mod bytecode;
 pub mod compiler;
+pub mod fsm;
 pub mod parser;
 
 pub use bytecode::to_binary;

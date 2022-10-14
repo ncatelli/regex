@@ -1041,7 +1041,7 @@ fn alternations_for_supplied_relative_opcodes(
         })
         .map(|(idx, opcodes, start_end_offsets)| {
             let optional_next_offsets =
-                (((idx as usize) + 1) != subexpr_cnt).then(|| start_end_offsets);
+                (((idx as usize) + 1) != subexpr_cnt).then_some(start_end_offsets);
             (optional_next_offsets, opcodes)
         })
         .flat_map(|(start_of_next, ops)| match start_of_next {

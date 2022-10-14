@@ -104,36 +104,36 @@ impl<NODE: Clone + Hash + Eq, EDGEVAL: Clone + Eq> From<DirectedEdgeDestination<
     }
 }
 
-pub trait Graph<NODE, Edge>
+pub trait Graph<NODE, EDGE>
 where
     NODE: Clone + Hash + Eq,
-    Edge: Clone + Eq,
+    EDGE: Clone + Eq,
 {
-    fn adjacent_mut(&mut self) -> &mut HashMap<NODE, Vec<DirectedEdgeDestination<NODE, Edge>>>;
-    fn adjacent(&self) -> &HashMap<NODE, Vec<DirectedEdgeDestination<NODE, Edge>>>;
+    fn adjacent_mut(&mut self) -> &mut HashMap<NODE, Vec<DirectedEdgeDestination<NODE, EDGE>>>;
+    fn adjacent(&self) -> &HashMap<NODE, Vec<DirectedEdgeDestination<NODE, EDGE>>>;
     fn add_node(&mut self, node: &NODE) -> bool;
-    fn add_edge(&mut self, edge: DirectedEdge<NODE, Edge>);
+    fn add_edge(&mut self, edge: DirectedEdge<NODE, EDGE>);
     fn neighbours(
         &self,
         node: &NODE,
-    ) -> Result<&Vec<DirectedEdgeDestination<NODE, Edge>>, GraphError>;
+    ) -> Result<&Vec<DirectedEdgeDestination<NODE, EDGE>>, GraphError>;
     fn contains(&self, node: &NODE) -> bool;
     fn nodes(&self) -> Vec<&NODE>;
-    fn edges(&self) -> Vec<DirectedEdge<NODE, Edge>>;
+    fn edges(&self) -> Vec<DirectedEdge<NODE, EDGE>>;
 }
 
-pub struct DirectedGraph<NODE, EDGEVAL>
+pub struct DirectedGraph<NODE, EDGE>
 where
     NODE: Clone + Hash + Eq,
-    EDGEVAL: Clone + Eq,
+    EDGE: Clone + Eq,
 {
-    adjacency_table: HashMap<NODE, Vec<DirectedEdgeDestination<NODE, EDGEVAL>>>,
+    adjacency_table: HashMap<NODE, Vec<DirectedEdgeDestination<NODE, EDGE>>>,
 }
 
-impl<NODE, EDGEVAL> DirectedGraph<NODE, EDGEVAL>
+impl<NODE, EDGE> DirectedGraph<NODE, EDGE>
 where
     NODE: Clone + Hash + Eq,
-    EDGEVAL: Clone + Eq,
+    EDGE: Clone + Eq,
 {
     pub fn new() -> Self {
         Self {
@@ -142,26 +142,26 @@ where
     }
 }
 
-impl<NODE, EDGEVAL> Default for DirectedGraph<NODE, EDGEVAL>
+impl<NODE, EDGE> Default for DirectedGraph<NODE, EDGE>
 where
     NODE: Clone + Hash + Eq,
-    EDGEVAL: Clone + Eq,
+    EDGE: Clone + Eq,
 {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<NODE, EDGEVAL> Graph<NODE, EDGEVAL> for DirectedGraph<NODE, EDGEVAL>
+impl<NODE, EDGE> Graph<NODE, EDGE> for DirectedGraph<NODE, EDGE>
 where
     NODE: Clone + Hash + Eq,
-    EDGEVAL: Clone + Eq,
+    EDGE: Clone + Eq,
 {
-    fn adjacent_mut(&mut self) -> &mut HashMap<NODE, Vec<DirectedEdgeDestination<NODE, EDGEVAL>>> {
+    fn adjacent_mut(&mut self) -> &mut HashMap<NODE, Vec<DirectedEdgeDestination<NODE, EDGE>>> {
         &mut self.adjacency_table
     }
 
-    fn adjacent(&self) -> &HashMap<NODE, Vec<DirectedEdgeDestination<NODE, EDGEVAL>>> {
+    fn adjacent(&self) -> &HashMap<NODE, Vec<DirectedEdgeDestination<NODE, EDGE>>> {
         &self.adjacency_table
     }
 
@@ -175,7 +175,7 @@ where
         }
     }
 
-    fn add_edge(&mut self, edge: DirectedEdge<NODE, EDGEVAL>) {
+    fn add_edge(&mut self, edge: DirectedEdge<NODE, EDGE>) {
         let (src, dest, edge_value) = (edge.src, edge.dest, edge.edge_value);
 
         self.add_node(src);
@@ -190,7 +190,7 @@ where
     fn neighbours(
         &self,
         node: &NODE,
-    ) -> Result<&Vec<DirectedEdgeDestination<NODE, EDGEVAL>>, GraphError> {
+    ) -> Result<&Vec<DirectedEdgeDestination<NODE, EDGE>>, GraphError> {
         match self.adjacent().get(node) {
             None => Err(GraphError::new(GraphErrorKind::NodeUndefined)),
             Some(i) => Ok(i),
@@ -205,7 +205,7 @@ where
         self.adjacent().keys().collect()
     }
 
-    fn edges(&self) -> Vec<DirectedEdge<NODE, EDGEVAL>> {
+    fn edges(&self) -> Vec<DirectedEdge<NODE, EDGE>> {
         let mut edges = Vec::new();
         for (from_node, from_node_neighbours) in self.adjacent() {
             let destination_tuple_iter = from_node_neighbours

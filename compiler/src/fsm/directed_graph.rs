@@ -49,10 +49,11 @@ impl std::fmt::Display for GraphError {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DirectedEdge<'a, NODE, EDGE>
 where
-    NODE: Clone + Hash + Eq,
-    EDGE: Clone + Eq,
+    NODE: Hash + Eq,
+    EDGE: Eq,
 {
     src: &'a NODE,
     dest: &'a NODE,
@@ -61,8 +62,8 @@ where
 
 impl<'a, NODE, EDGE> DirectedEdge<'a, NODE, EDGE>
 where
-    NODE: Clone + Hash + Eq,
-    EDGE: Clone + Eq,
+    NODE: Hash + Eq,
+    EDGE: Eq,
 {
     pub fn new(src: &'a NODE, dest: &'a NODE, edge_value: &'a EDGE) -> Self {
         Self {
@@ -75,30 +76,31 @@ where
 
 impl<'a, NODE, EDGE> From<DirectedEdge<'a, NODE, EDGE>> for (&'a NODE, &'a NODE, &'a EDGE)
 where
-    NODE: Clone + Hash + Eq,
-    EDGE: Clone + Eq,
+    NODE: Hash + Eq,
+    EDGE: Eq,
 {
     fn from(ded: DirectedEdge<'a, NODE, EDGE>) -> Self {
         (ded.src, ded.dest, ded.edge_value)
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
 pub struct DirectedEdgeDestination<NODE, EDGEVAL>
 where
-    NODE: Clone + Hash + Eq,
-    EDGEVAL: Clone + Eq,
+    NODE: Hash + Eq,
+    EDGEVAL: Eq,
 {
     dest: NODE,
     edge_value: EDGEVAL,
 }
 
-impl<NODE: Clone + Hash + Eq, EDGEVAL: Clone + Eq> DirectedEdgeDestination<NODE, EDGEVAL> {
+impl<NODE: Hash + Eq, EDGEVAL: Eq> DirectedEdgeDestination<NODE, EDGEVAL> {
     pub fn new(dest: NODE, edge_value: EDGEVAL) -> Self {
         Self { dest, edge_value }
     }
 }
 
-impl<NODE: Clone + Hash + Eq, EDGEVAL: Clone + Eq> From<DirectedEdgeDestination<NODE, EDGEVAL>>
+impl<NODE: Hash + Eq, EDGEVAL: Clone + Eq> From<DirectedEdgeDestination<NODE, EDGEVAL>>
     for (NODE, EDGEVAL)
 {
     fn from(ded: DirectedEdgeDestination<NODE, EDGEVAL>) -> Self {
@@ -108,14 +110,14 @@ impl<NODE: Clone + Hash + Eq, EDGEVAL: Clone + Eq> From<DirectedEdgeDestination<
 
 pub trait Graph<NODE, EDGE>
 where
-    NODE: Clone + Hash + Eq,
-    EDGE: Clone + Eq,
+    NODE: Hash + Eq,
+    EDGE: Eq,
 {
     fn adjacent_mut(&mut self) -> &mut HashMap<NODE, Vec<DirectedEdgeDestination<NODE, EDGE>>>;
     fn adjacent(&self) -> &HashMap<NODE, Vec<DirectedEdgeDestination<NODE, EDGE>>>;
-    fn add_node(&mut self, node: &NODE) -> bool;
-    fn add_edge(&mut self, edge: DirectedEdge<NODE, EDGE>);
-    fn neighbours(
+    fn add_node(&mut self, node: NODE) -> bool;
+    fn add_edge(&mut self, src: NODE, dest: NODE, edge_value: EDGE) -> Result<(), GraphError>;
+    fn neighbors(
         &self,
         node: &NODE,
     ) -> Result<&Vec<DirectedEdgeDestination<NODE, EDGE>>, GraphError>;
@@ -126,16 +128,16 @@ where
 
 pub struct DirectedGraph<NODE, EDGE>
 where
-    NODE: Clone + Hash + Eq,
-    EDGE: Clone + Eq,
+    NODE: Hash + Eq,
+    EDGE: Eq,
 {
     adjacency_table: HashMap<NODE, Vec<DirectedEdgeDestination<NODE, EDGE>>>,
 }
 
 impl<NODE, EDGE> DirectedGraph<NODE, EDGE>
 where
-    NODE: Clone + Hash + Eq,
-    EDGE: Clone + Eq,
+    NODE: Hash + Eq,
+    EDGE: Eq,
 {
     pub fn new() -> Self {
         Self {
@@ -146,8 +148,8 @@ where
 
 impl<NODE, EDGE> Default for DirectedGraph<NODE, EDGE>
 where
-    NODE: Clone + Hash + Eq,
-    EDGE: Clone + Eq,
+    NODE: Hash + Eq,
+    EDGE: Eq,
 {
     fn default() -> Self {
         Self::new()
@@ -156,8 +158,8 @@ where
 
 impl<NODE, EDGE> Graph<NODE, EDGE> for DirectedGraph<NODE, EDGE>
 where
-    NODE: Clone + Hash + Eq,
-    EDGE: Clone + Eq,
+    NODE: Hash + Eq,
+    EDGE: Eq,
 {
     fn adjacent_mut(&mut self) -> &mut HashMap<NODE, Vec<DirectedEdgeDestination<NODE, EDGE>>> {
         &mut self.adjacency_table
@@ -167,36 +169,44 @@ where
         &self.adjacency_table
     }
 
-    fn add_node(&mut self, node: &NODE) -> bool {
-        match self.adjacent().get(node) {
+    fn add_node(&mut self, node: NODE) -> bool {
+        match self.adjacent().get(&node) {
             None => {
-                self.adjacent_mut().insert(node.clone(), Vec::new());
+                self.adjacent_mut().insert(node, Vec::new());
                 true
             }
             _ => false,
         }
     }
 
-    fn add_edge(&mut self, edge: DirectedEdge<NODE, EDGE>) {
-        let (src, dest, edge_value) = (edge.src, edge.dest, edge.edge_value);
+    fn add_edge(&mut self, src: NODE, dest: NODE, edge_value: EDGE) -> Result<(), GraphError> {
+        match (self.contains(&src), self.contains(&dest)) {
+            (true, false) => Err(GraphError::new(GraphErrorKind::NodeUndefined)
+                .with_data("destination node undefined".to_string())),
+            (false, true) => Err(GraphError::new(GraphErrorKind::NodeUndefined)
+                .with_data("source node undefined".to_string())),
+            (false, false) => Err(GraphError::new(GraphErrorKind::NodeUndefined)
+                .with_data("source and destination node undefined".to_string())),
 
-        self.add_node(src);
-        self.add_node(dest);
+            // add the edge if both nodes exist.
+            (true, true) => {
+                self.adjacent_mut().entry(src).and_modify(|e| {
+                    let ded = DirectedEdgeDestination::new(dest, edge_value);
+                    e.push(ded);
+                });
 
-        self.adjacent_mut().entry(src.clone()).and_modify(|e| {
-            let ded = DirectedEdgeDestination::new(dest.clone(), edge_value.clone());
-            e.push(ded);
-        });
+                Ok(())
+            }
+        }
     }
 
-    fn neighbours(
+    fn neighbors(
         &self,
         node: &NODE,
     ) -> Result<&Vec<DirectedEdgeDestination<NODE, EDGE>>, GraphError> {
-        match self.adjacent().get(node) {
-            None => Err(GraphError::new(GraphErrorKind::NodeUndefined)),
-            Some(i) => Ok(i),
-        }
+        self.adjacent()
+            .get(node)
+            .ok_or_else(|| GraphError::new(GraphErrorKind::NodeUndefined))
     }
 
     fn contains(&self, node: &NODE) -> bool {
@@ -208,17 +218,15 @@ where
     }
 
     fn edges(&self) -> Vec<DirectedEdge<NODE, EDGE>> {
-        let mut edges = Vec::new();
-        for (from_node, from_node_neighbours) in self.adjacent() {
-            let destination_tuple_iter = from_node_neighbours
-                .iter()
-                .map(|edge_dest| (&edge_dest.dest, &edge_dest.edge_value));
-
-            for (to_node, weight) in destination_tuple_iter {
-                edges.push(DirectedEdge::new(from_node, to_node, weight));
-            }
-        }
-        edges
+        self.adjacent()
+            .iter()
+            .flat_map(|(from_node, from_node_neighbors)| {
+                from_node_neighbors
+                    .iter()
+                    .map(|edge_dest| (&edge_dest.dest, &edge_dest.edge_value))
+                    .map(|(to_node, weight)| DirectedEdge::new(from_node, to_node, weight))
+            })
+            .collect()
     }
 }
 
@@ -228,10 +236,10 @@ mod tests {
 
     #[test]
     fn should_add_directed_nodes_without_edges() {
-        let mut graph: DirectedGraph<String, ()> = DirectedGraph::new();
-        let nodes = ["a".to_string(), "b".to_string(), "c".to_string()];
+        let mut graph: DirectedGraph<_, ()> = DirectedGraph::new();
+        let nodes = ["a", "b", "c"];
 
-        for node in nodes.iter() {
+        for node in nodes {
             graph.add_node(node);
         }
 
@@ -241,5 +249,29 @@ mod tests {
         let expected: Vec<_> = nodes.iter().collect();
 
         assert_eq!(&received_nodes, &expected);
+    }
+
+    #[test]
+    fn should_add_directed_nodes_with_edges() {
+        let mut graph = DirectedGraph::new();
+        let nodes = ["a", "b", "c"];
+        for node in nodes {
+            graph.add_node(node);
+        }
+
+        let edges = [("a", "b", 1), ("b", "c", 2), ("c", "c", 1), ("c", "c", 2)];
+        for (src, dest, edge_val) in edges {
+            graph.add_edge(src, dest, edge_val).unwrap();
+        }
+
+        let mut received_edges = graph.edges();
+        received_edges.sort_by(|a, b| a.src.partial_cmp(b.src).unwrap());
+
+        let expected: Vec<_> = edges
+            .iter()
+            .map(|(src, dest, edge_val)| DirectedEdge::new(src, dest, edge_val))
+            .collect();
+
+        assert_eq!(&received_edges, &expected);
     }
 }

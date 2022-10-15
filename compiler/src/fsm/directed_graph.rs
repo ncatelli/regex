@@ -113,8 +113,10 @@ where
     NODE: Hash + Eq,
     EDGE: Eq,
 {
-    fn adjacent_mut(&mut self) -> &mut HashMap<NODE, Vec<DirectedEdgeDestination<NODE, EDGE>>>;
-    fn adjacent(&self) -> &HashMap<NODE, Vec<DirectedEdgeDestination<NODE, EDGE>>>;
+    fn adjacency_table_mut(
+        &mut self,
+    ) -> &mut HashMap<NODE, Vec<DirectedEdgeDestination<NODE, EDGE>>>;
+    fn adjacency_table(&self) -> &HashMap<NODE, Vec<DirectedEdgeDestination<NODE, EDGE>>>;
     fn add_node(&mut self, node: NODE) -> bool;
     fn add_edge(&mut self, src: NODE, dest: NODE, edge_value: EDGE) -> Result<(), GraphError>;
     fn neighbors(
@@ -161,18 +163,20 @@ where
     NODE: Hash + Eq,
     EDGE: Eq,
 {
-    fn adjacent_mut(&mut self) -> &mut HashMap<NODE, Vec<DirectedEdgeDestination<NODE, EDGE>>> {
+    fn adjacency_table_mut(
+        &mut self,
+    ) -> &mut HashMap<NODE, Vec<DirectedEdgeDestination<NODE, EDGE>>> {
         &mut self.adjacency_table
     }
 
-    fn adjacent(&self) -> &HashMap<NODE, Vec<DirectedEdgeDestination<NODE, EDGE>>> {
+    fn adjacency_table(&self) -> &HashMap<NODE, Vec<DirectedEdgeDestination<NODE, EDGE>>> {
         &self.adjacency_table
     }
 
     fn add_node(&mut self, node: NODE) -> bool {
-        match self.adjacent().get(&node) {
+        match self.adjacency_table().get(&node) {
             None => {
-                self.adjacent_mut().insert(node, Vec::new());
+                self.adjacency_table_mut().insert(node, Vec::new());
                 true
             }
             _ => false,
@@ -190,7 +194,7 @@ where
 
             // add the edge if both nodes exist.
             (true, true) => {
-                self.adjacent_mut().entry(src).and_modify(|e| {
+                self.adjacency_table_mut().entry(src).and_modify(|e| {
                     let ded = DirectedEdgeDestination::new(dest, edge_value);
                     e.push(ded);
                 });
@@ -204,21 +208,21 @@ where
         &self,
         node: &NODE,
     ) -> Result<&Vec<DirectedEdgeDestination<NODE, EDGE>>, GraphError> {
-        self.adjacent()
+        self.adjacency_table()
             .get(node)
             .ok_or_else(|| GraphError::new(GraphErrorKind::NodeUndefined))
     }
 
     fn contains(&self, node: &NODE) -> bool {
-        self.adjacent().get(node).is_some()
+        self.adjacency_table().get(node).is_some()
     }
 
     fn nodes(&self) -> Vec<&NODE> {
-        self.adjacent().keys().collect()
+        self.adjacency_table().keys().collect()
     }
 
     fn edges(&self) -> Vec<DirectedEdge<NODE, EDGE>> {
-        self.adjacent()
+        self.adjacency_table()
             .iter()
             .flat_map(|(from_node, from_node_neighbors)| {
                 from_node_neighbors

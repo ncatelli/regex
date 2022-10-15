@@ -21,12 +21,14 @@ impl GraphError {
     }
 
     /// Associates additional data with the error, returning the modified error.
+    #[allow(unused)]
     pub fn with_data(mut self, data: String) -> Self {
         self.with_data_mut(data);
         self
     }
 
     /// Associates additional data with the error.
+    #[allow(unused)]
     pub fn with_data_mut(&mut self, data: String) {
         self.data = Some(data);
     }

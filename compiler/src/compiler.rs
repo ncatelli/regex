@@ -103,6 +103,26 @@ impl RelativeOpcode {
 
 type RelativeOpcodes = Vec<RelativeOpcode>;
 
+/// Defines a trait for implementing compilation from a regex cast to a
+/// lowered output type.
+pub trait ASTCompilable<OUTPUT> {
+    type Error;
+
+    fn compile(ast: ast::Regex) -> Result<OUTPUT, Self::Error>;
+}
+
+/// Defines a type for representing compilation of a parsed ast to the regex
+/// runtime vm bytecode directly.
+pub struct VM;
+
+impl ASTCompilable<Instructions> for VM {
+    type Error = String;
+
+    fn compile(ast: ast::Regex) -> Result<Instructions, Self::Error> {
+        compile(ast)
+    }
+}
+
 /// Accepts a parsed AST and attempts to compile it into a runnable bytecode
 /// program for use with the regex-runtime crate.
 ///
@@ -1230,6 +1250,33 @@ mod tests {
                 ])
                 .with_fast_forward(FastForward::Char('a'))),
             compile(regex_ast)
+        )
+    }
+
+    #[test]
+    fn should_compile_through_trait() {
+        // approximate to `ab`
+        let regex_ast = Regex::Unanchored(Expression(vec![SubExpression(vec![
+            SubExpressionItem::Match(Match::WithoutQuantifier {
+                item: MatchItem::MatchCharacter(MatchCharacter(Char('a'))),
+            }),
+            SubExpressionItem::Match(Match::WithoutQuantifier {
+                item: MatchItem::MatchCharacter(MatchCharacter(Char('b'))),
+            }),
+        ])]));
+
+        assert_eq!(
+            Ok(Instructions::default()
+                .with_opcodes(vec![
+                    Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
+                    Opcode::Any,
+                    Opcode::Jmp(InstJmp::new(InstIndex::from(0))),
+                    Opcode::Consume(InstConsume::new('a')),
+                    Opcode::Consume(InstConsume::new('b')),
+                    Opcode::Match,
+                ])
+                .with_fast_forward(FastForward::Char('a'))),
+            VM::compile(regex_ast)
         )
     }
 

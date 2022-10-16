@@ -105,21 +105,166 @@ type RelativeOpcodes = Vec<RelativeOpcode>;
 
 /// Defines a trait for implementing compilation from a regex cast to a
 /// lowered output type.
-pub trait ASTCompilable<OUTPUT> {
+pub trait Lowerable<INPUT, OUTPUT> {
     type Error;
 
-    fn compile(&mut self, ast: ast::Regex) -> Result<OUTPUT, Self::Error>;
+    fn lower(&mut self, input: INPUT) -> Result<OUTPUT, Self::Error>;
 }
 
 /// Defines a type for representing compilation of a parsed ast to the regex
 /// runtime vm bytecode directly.
 pub struct VM;
 
-impl ASTCompilable<Instructions> for VM {
+impl Lowerable<ast::Regex, Instructions> for VM {
     type Error = String;
 
-    fn compile(&mut self, ast: ast::Regex) -> Result<Instructions, Self::Error> {
-        compile(ast)
+    fn lower(&mut self, input: ast::Regex) -> Result<Instructions, Self::Error> {
+        let mut save_group_id_counter = 0_usize;
+
+        let suffix = [RelativeOpcode::Match];
+
+        let (anchored, relative_ops): (bool, Result<RelativeOpcodes, _>) = match input {
+            ast::Regex::StartOfStringAnchored(expr) => (
+                true,
+                expression(&mut save_group_id_counter, expr)
+                    .map(|expr| expr.into_iter().chain(suffix.into_iter()).collect()),
+            ),
+            ast::Regex::Unanchored(expr) => (
+                false,
+                expression(&mut save_group_id_counter, expr).map(|expr| {
+                    // match anything
+                    let prefix = [
+                        RelativeOpcode::Split(3, 1),
+                        RelativeOpcode::Any,
+                        RelativeOpcode::Jmp(-2),
+                    ];
+
+                    prefix
+                        .into_iter()
+                        .chain(expr.into_iter())
+                        .chain(suffix.into_iter())
+                        .collect()
+                }),
+            ),
+        };
+
+        relative_ops
+            .map(convert_relative_ops_to_absolute_ops)
+            .map(|(sets, insts)| {
+                let first_available_stop = (insts)
+                    .iter()
+                    .find(|opcode| opcode.requires_lookahead() || opcode.is_explicit_consuming())
+                    .cloned();
+
+                match (anchored, first_available_stop) {
+                    (false, Some(Opcode::Consume(InstConsume { value }))) => {
+                        Instructions::new(sets, insts).with_fast_forward(FastForward::Char(value))
+                    }
+                    (false, Some(Opcode::ConsumeSet(InstConsumeSet { idx }))) => {
+                        // panics if the set is undefined.
+                        // This should never happen.
+                        let _ = sets.get(idx).unwrap();
+                        Instructions::new(sets, insts).with_fast_forward(FastForward::Set(idx))
+                    }
+                    // This disables fast-forward for all other cases whcih
+                    // primarily should be either an anchored or empty program.
+                    _ => Instructions::new(sets, insts),
+                }
+            })
+    }
+}
+
+impl Lowerable<Vec<ast::Regex>, Instructions> for VM {
+    type Error = String;
+
+    fn lower(&mut self, input: Vec<ast::Regex>) -> Result<Instructions, Self::Error> {
+        let mut anchored = Vec::with_capacity(input.len());
+        let mut unanchored = Vec::with_capacity(input.len());
+
+        // populate the above lists of anchored and unanchored programs.
+        for (expr_id, regex_ast) in input.into_iter().enumerate() {
+            // reset save group id to 0
+            let mut save_group_id_counter = 0_usize;
+
+            let expr_id = u32::try_from(expr_id).map_err(|e| format!("{:?}", e))?;
+
+            // Start
+            let mut relative_expression_opcodes =
+                vec![RelativeOpcode::Meta(MetaKind::SetExpressionId(expr_id))];
+
+            match regex_ast {
+                ast::Regex::StartOfStringAnchored(expr) => {
+                    let mut generated_opcodes = expression(&mut save_group_id_counter, expr)?;
+                    relative_expression_opcodes.append(&mut generated_opcodes);
+                    relative_expression_opcodes.push(RelativeOpcode::Match);
+                    anchored.push(relative_expression_opcodes);
+                }
+
+                ast::Regex::Unanchored(expr) => {
+                    let mut generated_opcodes = expression(&mut save_group_id_counter, expr)?;
+                    relative_expression_opcodes.append(&mut generated_opcodes);
+                    relative_expression_opcodes.push(RelativeOpcode::Match);
+                    unanchored.push(relative_expression_opcodes);
+                }
+            };
+        }
+
+        let anchored_expression_cnt = anchored.len();
+        let anchored_opcode_cnt = anchored.iter().map(|expr| expr.len()).sum::<usize>();
+
+        let unanchored_expression_cnt = unanchored.len();
+        let unanchored_offsets_from_start_of_exprs = generate_offsets_from_start(&unanchored);
+
+        let has_both_anchored_and_unanchored_segments =
+            (unanchored_expression_cnt > 0) && (anchored_expression_cnt > 0);
+
+        // generate a reverse stack of all expression start offsets then generate routing split operations.
+        let anchored_offset_stack = generate_offsets_from_start(&anchored)
+            .into_iter()
+            .rev()
+            .collect::<Vec<_>>();
+        let anchored_expr_splits = generate_nested_split_expressions(anchored_offset_stack)?;
+
+        // generate a reverse stack of all expression start offsets then generate routing split operations.
+        let unanchored_expr_splits = generate_nested_split_expressions(
+            unanchored_offsets_from_start_of_exprs
+                .into_iter()
+                .rev()
+                .collect::<Vec<_>>(),
+        )?;
+
+        // The initial prefix that jumps into the expression routing splits with
+        // a lazy fallover into a consuming `Any` match.
+        let unanchored_prefix = vec![
+            RelativeOpcode::Split(3, 1),
+            RelativeOpcode::Any,
+            // jmp to the first unanchored split (start of unanchored)
+            RelativeOpcode::Jmp(-2),
+        ];
+
+        // existence of unanchored expressions changes the anchored_prefix so this is generated last.
+        let anchored_prefix = if has_both_anchored_and_unanchored_segments {
+            let start_of_unanchored_exprs =
+                i32::try_from(anchored_expr_splits.len() + anchored_opcode_cnt + 1)
+                    .map_err(|e| e.to_string())?;
+
+            vec![RelativeOpcode::Split(1, start_of_unanchored_exprs)]
+        } else {
+            vec![]
+        };
+
+        let joined_opcodes = anchored_prefix
+            .into_iter()
+            .chain(anchored_expr_splits.into_iter())
+            .chain(anchored.into_iter().flatten())
+            .chain(unanchored_prefix.into_iter())
+            .chain(unanchored_expr_splits.into_iter())
+            .chain(unanchored.into_iter().flatten())
+            .collect::<Vec<_>>();
+
+        let (sets, opcodes) = convert_relative_ops_to_absolute_ops(joined_opcodes);
+
+        Ok(Instructions::new(sets, opcodes))
     }
 }
 
@@ -156,59 +301,8 @@ impl ASTCompilable<Instructions> for VM {
 ///     compile(regex_ast)
 /// )
 /// ```
-pub fn compile(regex_ast: ast::Regex) -> Result<Instructions, String> {
-    let mut save_group_id_counter = 0_usize;
-
-    let suffix = [RelativeOpcode::Match];
-
-    let (anchored, relative_ops): (bool, Result<RelativeOpcodes, _>) = match regex_ast {
-        ast::Regex::StartOfStringAnchored(expr) => (
-            true,
-            expression(&mut save_group_id_counter, expr)
-                .map(|expr| expr.into_iter().chain(suffix.into_iter()).collect()),
-        ),
-        ast::Regex::Unanchored(expr) => (
-            false,
-            expression(&mut save_group_id_counter, expr).map(|expr| {
-                // match anything
-                let prefix = [
-                    RelativeOpcode::Split(3, 1),
-                    RelativeOpcode::Any,
-                    RelativeOpcode::Jmp(-2),
-                ];
-
-                prefix
-                    .into_iter()
-                    .chain(expr.into_iter())
-                    .chain(suffix.into_iter())
-                    .collect()
-            }),
-        ),
-    };
-
-    relative_ops
-        .map(convert_relative_ops_to_absolute_ops)
-        .map(|(sets, insts)| {
-            let first_available_stop = (insts)
-                .iter()
-                .find(|opcode| opcode.requires_lookahead() || opcode.is_explicit_consuming())
-                .cloned();
-
-            match (anchored, first_available_stop) {
-                (false, Some(Opcode::Consume(InstConsume { value }))) => {
-                    Instructions::new(sets, insts).with_fast_forward(FastForward::Char(value))
-                }
-                (false, Some(Opcode::ConsumeSet(InstConsumeSet { idx }))) => {
-                    // panics if the set is undefined.
-                    // This should never happen.
-                    let _ = sets.get(idx).unwrap();
-                    Instructions::new(sets, insts).with_fast_forward(FastForward::Set(idx))
-                }
-                // This disables fast-forward for all other cases whcih
-                // primarily should be either an anchored or empty program.
-                _ => Instructions::new(sets, insts),
-            }
-        })
+pub fn compile(ast: ast::Regex) -> Result<Instructions, String> {
+    VM.lower(ast)
 }
 
 /// Accepts multiple parsed ASTs and attempts to compile it into a runnable
@@ -286,94 +380,8 @@ pub fn compile(regex_ast: ast::Regex) -> Result<Instructions, String> {
 ///    compile_many(all_exprs),
 /// );
 /// ```
-pub fn compile_many(regex_asts: Vec<ast::Regex>) -> Result<Instructions, String> {
-    let mut anchored = Vec::with_capacity(regex_asts.len());
-    let mut unanchored = Vec::with_capacity(regex_asts.len());
-
-    // populate the above lists of anchored and unanchored programs.
-    for (expr_id, regex_ast) in regex_asts.into_iter().enumerate() {
-        // reset save group id to 0
-        let mut save_group_id_counter = 0_usize;
-
-        let expr_id = u32::try_from(expr_id).map_err(|e| format!("{:?}", e))?;
-
-        // Start
-        let mut relative_expression_opcodes =
-            vec![RelativeOpcode::Meta(MetaKind::SetExpressionId(expr_id))];
-
-        match regex_ast {
-            ast::Regex::StartOfStringAnchored(expr) => {
-                let mut generated_opcodes = expression(&mut save_group_id_counter, expr)?;
-                relative_expression_opcodes.append(&mut generated_opcodes);
-                relative_expression_opcodes.push(RelativeOpcode::Match);
-                anchored.push(relative_expression_opcodes);
-            }
-
-            ast::Regex::Unanchored(expr) => {
-                let mut generated_opcodes = expression(&mut save_group_id_counter, expr)?;
-                relative_expression_opcodes.append(&mut generated_opcodes);
-                relative_expression_opcodes.push(RelativeOpcode::Match);
-                unanchored.push(relative_expression_opcodes);
-            }
-        };
-    }
-
-    let anchored_expression_cnt = anchored.len();
-    let anchored_opcode_cnt = anchored.iter().map(|expr| expr.len()).sum::<usize>();
-
-    let unanchored_expression_cnt = unanchored.len();
-    let unanchored_offsets_from_start_of_exprs = generate_offsets_from_start(&unanchored);
-
-    let has_both_anchored_and_unanchored_segments =
-        (unanchored_expression_cnt > 0) && (anchored_expression_cnt > 0);
-
-    // generate a reverse stack of all expression start offsets then generate routing split operations.
-    let anchored_offset_stack = generate_offsets_from_start(&anchored)
-        .into_iter()
-        .rev()
-        .collect::<Vec<_>>();
-    let anchored_expr_splits = generate_nested_split_expressions(anchored_offset_stack)?;
-
-    // generate a reverse stack of all expression start offsets then generate routing split operations.
-    let unanchored_expr_splits = generate_nested_split_expressions(
-        unanchored_offsets_from_start_of_exprs
-            .into_iter()
-            .rev()
-            .collect::<Vec<_>>(),
-    )?;
-
-    // The initial prefix that jumps into the expression routing splits with
-    // a lazy fallover into a consuming `Any` match.
-    let unanchored_prefix = vec![
-        RelativeOpcode::Split(3, 1),
-        RelativeOpcode::Any,
-        // jmp to the first unanchored split (start of unanchored)
-        RelativeOpcode::Jmp(-2),
-    ];
-
-    // existence of unanchored expressions changes the anchored_prefix so this is generated last.
-    let anchored_prefix = if has_both_anchored_and_unanchored_segments {
-        let start_of_unanchored_exprs =
-            i32::try_from(anchored_expr_splits.len() + anchored_opcode_cnt + 1)
-                .map_err(|e| e.to_string())?;
-
-        vec![RelativeOpcode::Split(1, start_of_unanchored_exprs)]
-    } else {
-        vec![]
-    };
-
-    let joined_opcodes = anchored_prefix
-        .into_iter()
-        .chain(anchored_expr_splits.into_iter())
-        .chain(anchored.into_iter().flatten())
-        .chain(unanchored_prefix.into_iter())
-        .chain(unanchored_expr_splits.into_iter())
-        .chain(unanchored.into_iter().flatten())
-        .collect::<Vec<_>>();
-
-    let (sets, opcodes) = convert_relative_ops_to_absolute_ops(joined_opcodes);
-
-    Ok(Instructions::new(sets, opcodes))
+pub fn compile_many(asts: Vec<ast::Regex>) -> Result<Instructions, String> {
+    VM.lower(asts)
 }
 
 /// from a stack of offsets, starting from last expression start first,
@@ -1276,7 +1284,7 @@ mod tests {
                     Opcode::Match,
                 ])
                 .with_fast_forward(FastForward::Char('a'))),
-            VM.compile(regex_ast)
+            VM.lower(regex_ast)
         )
     }
 

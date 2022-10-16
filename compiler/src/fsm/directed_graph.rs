@@ -247,8 +247,11 @@ mod tests {
             graph.add_node(node);
         }
 
-        let mut received_nodes = graph.nodes();
-        received_nodes.sort();
+        let received_nodes = {
+            let mut received_nodes = graph.nodes();
+            received_nodes.sort();
+            received_nodes
+        };
 
         let expected: Vec<_> = nodes.iter().collect();
 
@@ -268,8 +271,11 @@ mod tests {
             graph.add_edge(src, dest, edge_val).unwrap();
         }
 
-        let mut received_edges = graph.edges();
-        received_edges.sort_by(|a, b| a.src.partial_cmp(b.src).unwrap());
+        let received_edges = {
+            let mut received_edges = graph.edges();
+            received_edges.sort_by(|a, b| a.src.partial_cmp(b.src).unwrap());
+            received_edges
+        };
 
         let expected: Vec<_> = edges
             .iter()
@@ -277,5 +283,34 @@ mod tests {
             .collect();
 
         assert_eq!(&received_edges, &expected);
+    }
+
+    #[test]
+    fn neighbors_should_return_only_adjacent_nodes() {
+        let mut graph = DirectedGraph::new();
+        let nodes = ["a", "b", "c"];
+        for node in nodes {
+            graph.add_node(node);
+        }
+
+        let edges = [("a", "b", 1), ("b", "c", 2), ("c", "c", 1), ("c", "c", 2)];
+        for (src, dest, edge_val) in edges {
+            graph.add_edge(src, dest, edge_val).unwrap();
+        }
+
+        // single neighbor
+        let received_neighbors = graph.neighbors(&"b");
+        let expected = vec![DirectedEdgeDestination::new("c", 2)];
+
+        assert_eq!(received_neighbors, Ok(&expected));
+
+        // multiple neighbors
+        let received_neighbors = graph.neighbors(&"c");
+        let expected = vec![
+            DirectedEdgeDestination::new("c", 1),
+            DirectedEdgeDestination::new("c", 2),
+        ];
+
+        assert_eq!(received_neighbors, Ok(&expected));
     }
 }

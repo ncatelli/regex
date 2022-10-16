@@ -108,7 +108,7 @@ type RelativeOpcodes = Vec<RelativeOpcode>;
 pub trait ASTCompilable<OUTPUT> {
     type Error;
 
-    fn compile(ast: ast::Regex) -> Result<OUTPUT, Self::Error>;
+    fn compile(&mut self, ast: ast::Regex) -> Result<OUTPUT, Self::Error>;
 }
 
 /// Defines a type for representing compilation of a parsed ast to the regex
@@ -118,7 +118,7 @@ pub struct VM;
 impl ASTCompilable<Instructions> for VM {
     type Error = String;
 
-    fn compile(ast: ast::Regex) -> Result<Instructions, Self::Error> {
+    fn compile(&mut self, ast: ast::Regex) -> Result<Instructions, Self::Error> {
         compile(ast)
     }
 }
@@ -1276,7 +1276,7 @@ mod tests {
                     Opcode::Match,
                 ])
                 .with_fast_forward(FastForward::Char('a'))),
-            VM::compile(regex_ast)
+            VM.compile(regex_ast)
         )
     }
 

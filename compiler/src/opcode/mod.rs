@@ -1,4 +1,36 @@
 //! Provides methods and types to facilitate the lowering of a parsed ast directly to bytecode.
+//!
+//! # Example
+//!
+//! ```
+//! use regex_compiler::ast::*;
+//! use regex_compiler::compiler::Lowerable;
+//! use regex_compiler::opcode::VM;
+//! use regex_runtime::*;
+//!
+//! // approximate to `ab`
+//! let regex_ast = Regex::Unanchored(Expression(vec![SubExpression(vec![
+//!     SubExpressionItem::Match(Match::WithoutQuantifier {
+//!         item: MatchItem::MatchCharacter(MatchCharacter(Char('a'))),
+//!      }),
+//!      SubExpressionItem::Match(Match::WithoutQuantifier {
+//!          item: MatchItem::MatchCharacter(MatchCharacter(Char('b'))),
+//!     }),
+//! ])]));
+//!
+//! assert_eq!(
+//!     Ok(Instructions::default()
+//!         .with_opcodes(vec![
+//!             Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
+//!             Opcode::Any,
+//!             Opcode::Jmp(InstJmp::new(InstIndex::from(0))),
+//!             Opcode::Consume(InstConsume::new('a')),
+//!             Opcode::Consume(InstConsume::new('b')),
+//!             Opcode::Match,
+//!         ]).with_fast_forward(FastForward::Char('a'))),
+//!     VM.lower(regex_ast)
+//! )
+//! ```
 
 use super::ast;
 use crate::compiler::Lowerable;
@@ -80,6 +112,39 @@ pub struct VM;
 impl Lowerable<ast::Regex, Instructions> for VM {
     type Error = String;
 
+    /// Lowers a regex to runtime bytecode.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use regex_compiler::ast::*;
+    /// use regex_compiler::compiler::Lowerable;
+    /// use regex_compiler::opcode::VM;
+    /// use regex_runtime::*;
+    ///
+    /// // approximate to `ab`
+    /// let regex_ast = Regex::Unanchored(Expression(vec![SubExpression(vec![
+    ///     SubExpressionItem::Match(Match::WithoutQuantifier {
+    ///         item: MatchItem::MatchCharacter(MatchCharacter(Char('a'))),
+    ///      }),
+    ///      SubExpressionItem::Match(Match::WithoutQuantifier {
+    ///          item: MatchItem::MatchCharacter(MatchCharacter(Char('b'))),
+    ///     }),
+    /// ])]));
+    ///
+    /// assert_eq!(
+    ///     Ok(Instructions::default()
+    ///         .with_opcodes(vec![
+    ///             Opcode::Split(InstSplit::new(InstIndex::from(3), InstIndex::from(1))),
+    ///             Opcode::Any,
+    ///             Opcode::Jmp(InstJmp::new(InstIndex::from(0))),
+    ///             Opcode::Consume(InstConsume::new('a')),
+    ///             Opcode::Consume(InstConsume::new('b')),
+    ///             Opcode::Match,
+    ///         ]).with_fast_forward(FastForward::Char('a'))),
+    ///     VM.lower(regex_ast)
+    /// )
+    /// ```
     fn lower(&mut self, input: ast::Regex) -> Result<Instructions, Self::Error> {
         let mut save_group_id_counter = 0_usize;
 
@@ -139,6 +204,78 @@ impl Lowerable<ast::Regex, Instructions> for VM {
 impl Lowerable<Vec<ast::Regex>, Instructions> for VM {
     type Error = String;
 
+    /// Lowers a multiple regular expresions to runtime bytecode.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use regex_compiler::ast::*;
+    /// use regex_compiler::compiler::Lowerable;
+    /// use regex_compiler::opcode::VM;
+    /// use regex_runtime::*;
+    ///
+    /// // approximate to `ab`
+    /// // approximate to `^(a)`
+    /// let regex_ast_anchored =
+    ///     Regex::StartOfStringAnchored(Expression(vec![SubExpression(vec![
+    ///         SubExpressionItem::Group(Group::Capturing {
+    ///             expression: Expression(vec![SubExpression(vec![SubExpressionItem::Match(
+    ///                 Match::WithoutQuantifier {
+    ///                     item: MatchItem::MatchCharacter(MatchCharacter(Char('a'))),
+    ///                 },
+    ///             )])]),
+    ///         }),
+    ///     ])]));
+    ///
+    /// let regex_ast_unanchored = ['b', 'c'].into_iter().map(|c| {
+    ///     Regex::Unanchored(Expression(vec![SubExpression(vec![
+    ///         SubExpressionItem::Group(Group::Capturing {
+    ///             expression: Expression(vec![SubExpression(vec![SubExpressionItem::Match(
+    ///                 Match::WithoutQuantifier {
+    ///                     item: MatchItem::MatchCharacter(MatchCharacter(Char(c))),
+    ///                 },
+    ///             )])]),
+    ///         }),
+    ///     ])]))
+    /// });
+    ///
+    /// let all_exprs = [regex_ast_anchored]
+    ///     .into_iter()
+    ///     .chain(regex_ast_unanchored)
+    ///     .collect::<Vec<_>>();
+    ///
+    /// let expected = vec![
+    ///     Opcode::Split(InstSplit::new(InstIndex::from(1), InstIndex::from(6))),
+    ///     Opcode::Meta(InstMeta(MetaKind::SetExpressionId(0))),
+    ///     // first anchored expr
+    ///     Opcode::StartSave(InstStartSave::new(0)),
+    ///     Opcode::Consume(InstConsume::new('a')),
+    ///     Opcode::EndSave(InstEndSave::new(0)),
+    ///     Opcode::Match,
+    ///     // unanchored start
+    ///     Opcode::Split(InstSplit::new(InstIndex::from(9), InstIndex::from(7))),
+    ///     Opcode::Any,
+    ///     Opcode::Jmp(InstJmp::new(InstIndex::from(6))),
+    ///     Opcode::Split(InstSplit::new(InstIndex::from(10), InstIndex::from(15))),
+    ///     // first unanchored expr
+    ///     Opcode::Meta(InstMeta(MetaKind::SetExpressionId(1))),
+    ///     Opcode::StartSave(InstStartSave::new(0)),
+    ///     Opcode::Consume(InstConsume::new('b')),
+    ///     Opcode::EndSave(InstEndSave::new(0)),
+    ///     Opcode::Match,
+    ///     // second unanchored expr
+    ///     Opcode::Meta(InstMeta(MetaKind::SetExpressionId(2))),
+    ///     Opcode::StartSave(InstStartSave::new(0)),
+    ///     Opcode::Consume(InstConsume::new('c')),
+    ///     Opcode::EndSave(InstEndSave::new(0)),
+    ///     Opcode::Match,
+    /// ];
+    ///
+    /// assert_eq!(
+    ///    Ok(Instructions::default().with_opcodes(expected)),
+    ///    VM.lower(all_exprs),
+    /// );
+    /// ```
     fn lower(&mut self, input: Vec<ast::Regex>) -> Result<Instructions, Self::Error> {
         let mut anchored = Vec::with_capacity(input.len());
         let mut unanchored = Vec::with_capacity(input.len());

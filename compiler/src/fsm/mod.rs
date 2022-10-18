@@ -20,7 +20,7 @@ where
     fn states(&self) -> HashSet<&'a STATE>;
     fn initial_state(&self) -> &'a STATE;
     fn final_states(&self) -> HashSet<&'a STATE>;
-    fn transition(&self, _: &'a STATE, _: &LANG::T) -> Option<&'a STATE>;
+    fn transition(&self, _: &'a STATE, _: Option<&LANG::T>) -> Option<Vec<&'a STATE>>;
     fn is_final(&self, state: &'a STATE) -> bool {
         self.final_states().contains(state)
     }
@@ -30,7 +30,7 @@ pub struct ConcreteNFA<'a, STATE, TF, LANG>
 where
     STATE: Hash + Eq,
     LANG: Language,
-    TF: Fn(&HashSet<&'a STATE>, &'a STATE, &LANG::T) -> Option<&'a STATE>,
+    TF: Fn(&HashSet<&'a STATE>, &'a STATE, Option<&LANG::T>) -> Option<Vec<&'a STATE>>,
 {
     language: std::marker::PhantomData<LANG>,
     states: HashSet<&'a STATE>,
@@ -43,7 +43,7 @@ impl<'a, STATE, TF, LANG> ConcreteNFA<'a, STATE, TF, LANG>
 where
     STATE: Hash + Eq,
     LANG: Language,
-    TF: Fn(&HashSet<&'a STATE>, &'a STATE, &LANG::T) -> Option<&'a STATE>,
+    TF: Fn(&HashSet<&'a STATE>, &'a STATE, Option<&LANG::T>) -> Option<Vec<&'a STATE>>,
 {
     pub fn try_new(
         states: &[&'a STATE],
@@ -76,7 +76,7 @@ impl<'a, STATE, TF, LANG> NFA<'a, STATE, TF, LANG> for ConcreteNFA<'a, STATE, TF
 where
     STATE: Hash + Eq,
     LANG: Language,
-    TF: Fn(&HashSet<&'a STATE>, &'a STATE, &LANG::T) -> Option<&'a STATE>,
+    TF: Fn(&HashSet<&'a STATE>, &'a STATE, Option<&LANG::T>) -> Option<Vec<&'a STATE>>,
 {
     fn states(&self) -> HashSet<&'a STATE> {
         self.states.clone()
@@ -93,8 +93,8 @@ where
     fn transition(
         &self,
         current_state: &'a STATE,
-        next: &<LANG as Language>::T,
-    ) -> Option<&'a STATE> {
+        next: Option<&<LANG as Language>::T>,
+    ) -> Option<Vec<&'a STATE>> {
         (self.transition_func)(&self.states, current_state, next)
     }
 }
@@ -127,17 +127,18 @@ mod tests {
     fn ends_in_one_one_transition_func<'a>(
         states: &HashSet<&'a States>,
         current_state: &'a States,
-        input: &Alphabet,
-    ) -> Option<&'a States> {
+        input: Option<&Alphabet>,
+    ) -> Option<Vec<&'a States>> {
         let a = states.get(&States::A).unwrap();
         let b = states.get(&States::B).unwrap();
         let c = states.get(&States::C).unwrap();
 
         match (current_state, input) {
-            (_, Alphabet::Zero) => Some(a),
-            (States::A, Alphabet::One) => Some(b),
-            (States::B, Alphabet::One) => Some(c),
-            (States::C, Alphabet::One) => Some(c),
+            (_, Some(Alphabet::Zero)) => Some(vec![a]),
+            (States::A, Some(Alphabet::One)) => Some(vec![b]),
+            (States::B, Some(Alphabet::One)) => Some(vec![c]),
+            (States::C, Some(Alphabet::One)) => Some(vec![c]),
+            (state, None) => Some(vec![state]),
         }
     }
 
@@ -169,7 +170,6 @@ mod tests {
         )
         .unwrap();
 
-        let mut current_state = nfa.initial_state();
         let inputs = [
             Alphabet::Zero,
             Alphabet::One,
@@ -178,11 +178,16 @@ mod tests {
             Alphabet::One,
         ];
 
-        for input in inputs {
-            let next_state = nfa.transition(current_state, &input);
-            current_state = next_state.unwrap()
-        }
+        let current_states = inputs
+            .iter()
+            .fold(vec![nfa.initial_state()], |curr_state, input| {
+                curr_state
+                    .iter()
+                    .filter_map(|&state| nfa.transition(state, Some(input)))
+                    .flatten()
+                    .collect::<Vec<_>>()
+            });
 
-        assert!(nfa.is_final(current_state))
+        assert!(current_states.iter().all(|&state| nfa.is_final(state)))
     }
 }

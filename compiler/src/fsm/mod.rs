@@ -2,6 +2,7 @@
 //! a finite state machine.
 
 mod directed_graph;
+mod unicode;
 
 use std::collections::hash_set::HashSet;
 use std::hash::Hash;
@@ -9,7 +10,14 @@ use std::hash::Hash;
 pub trait Language {
     type T: Hash + Eq;
 
+    const VARIANT_CNT: usize;
+
+    /// Returns a hash set
     fn variants(&self) -> HashSet<Self::T>;
+
+    fn contains(&self, item: &Self::T) -> bool {
+        self.variants().contains(item)
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -153,34 +161,34 @@ mod tests {
     }
 
     #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-    enum Alphabet {
-        Zero,
-        One,
-    }
+    struct BinaryAlphabet;
 
-    impl Language for Alphabet {
-        type T = Alphabet;
+    impl Language for BinaryAlphabet {
+        type T = char;
 
-        fn variants(&self) -> HashSet<Self> {
-            [Self::Zero, Self::One].into_iter().collect()
+        const VARIANT_CNT: usize = 2;
+
+        fn variants(&self) -> HashSet<Self::T> {
+            ['0', '1'].into_iter().collect()
         }
     }
 
     fn ends_in_one_one_transition_func<'a>(
         states: &HashSet<&'a States>,
         current_state: &'a States,
-        input: Option<&Alphabet>,
+        input: Option<&char>,
     ) -> TransitionResult<'a, States> {
         let a = states.get(&States::A).unwrap();
         let b = states.get(&States::B).unwrap();
         let c = states.get(&States::C).unwrap();
 
         match (current_state, input) {
-            (_, Some(Alphabet::Zero)) => TransitionResult::Consuming(vec![a]),
-            (States::A, Some(Alphabet::One)) => TransitionResult::Consuming(vec![b]),
-            (States::B, Some(Alphabet::One)) => TransitionResult::Consuming(vec![c]),
-            (States::C, Some(Alphabet::One)) => TransitionResult::Consuming(vec![c]),
+            (_, Some(&'0')) => TransitionResult::Consuming(vec![a]),
+            (States::A, Some(&'1')) => TransitionResult::Consuming(vec![b]),
+            (States::B, Some(&'1')) => TransitionResult::Consuming(vec![c]),
+            (States::C, Some(&'1')) => TransitionResult::Consuming(vec![c]),
             (state, None) => TransitionResult::NonConsuming(vec![state]),
+            _ => TransitionResult::DeadState,
         }
     }
 
@@ -189,7 +197,7 @@ mod tests {
         let states = vec![&States::A, &States::B, &States::C];
         let final_state = [states[2]].into_iter().collect();
 
-        let nfa = ConcreteNFA::<_, _, Alphabet>::try_new(
+        let nfa = ConcreteNFA::<_, _, BinaryAlphabet>::try_new(
             &states,
             states[0],
             final_state,
@@ -204,7 +212,7 @@ mod tests {
         let states = vec![&States::A, &States::B, &States::C];
         let final_state = [states[2]].into_iter().collect();
 
-        let nfa = ConcreteNFA::<_, _, Alphabet>::try_new(
+        let nfa = ConcreteNFA::<_, _, BinaryAlphabet>::try_new(
             &states,
             states[0],
             final_state,
@@ -212,23 +220,17 @@ mod tests {
         )
         .unwrap();
 
-        let inputs = [
-            Alphabet::Zero,
-            Alphabet::One,
-            Alphabet::Zero,
-            Alphabet::One,
-            Alphabet::One,
-        ];
+        let inputs = "01011";
 
         let current_states = inputs
-            .iter()
+            .chars()
             .fold(vec![nfa.initial_state()], |curr_state, input| {
                 curr_state
                     .iter()
                     // calculates the transition for a non-epsilon input,
                     // converting the result to an option where `Some`
                     // represents all non-`DeadState` values.
-                    .filter_map(|&state| nfa.transition(state, Some(input)).ok_or_else(|| ()).ok())
+                    .filter_map(|&state| nfa.transition(state, Some(&input)).ok_or_else(|| ()).ok())
                     .flatten()
                     .collect::<Vec<_>>()
             });

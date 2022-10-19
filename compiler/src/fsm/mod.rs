@@ -12,6 +12,48 @@ pub trait Language {
     fn variants(&self) -> HashSet<Self::T>;
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum TransitionResult<'a, STATE>
+where
+    STATE: Hash + Eq,
+{
+    Consuming(Vec<&'a STATE>),
+    NonConsuming(Vec<&'a STATE>),
+    DeadState,
+}
+
+impl<'a, STATE> TransitionResult<'a, STATE>
+where
+    STATE: Hash + Eq,
+{
+    /// Return the contained value of the `Consuming` or `NonConsuming`
+    /// variants.
+    ///
+    /// # Panics
+    /// Panics if the self value equals `DeadState`.
+    pub fn unwrap(self) -> Vec<&'a STATE> {
+        match self {
+            TransitionResult::Consuming(inner) | TransitionResult::NonConsuming(inner) => inner,
+            TransitionResult::DeadState => {
+                panic!("called `TransitionResult::unwrap()` on a `DeadState` value")
+            }
+        }
+    }
+
+    /// Transforms the `TransitionResult<'a, STATE>> into a
+    /// `Result<Vec<&'a STATE>, E>`, mapping `Consuming(inner)` and
+    /// `NonConsuming(inner)` to `Ok(inner)` and DeadState to `Err(err())`.
+    pub fn ok_or_else<E, F>(self, err: F) -> Result<Vec<&'a STATE>, E>
+    where
+        F: FnOnce() -> E,
+    {
+        match self {
+            TransitionResult::Consuming(inner) | TransitionResult::NonConsuming(inner) => Ok(inner),
+            TransitionResult::DeadState => Err(err()),
+        }
+    }
+}
+
 pub trait NFA<'a, STATE, TF, LANG>
 where
     STATE: Hash + Eq,
@@ -20,7 +62,7 @@ where
     fn states(&self) -> HashSet<&'a STATE>;
     fn initial_state(&self) -> &'a STATE;
     fn final_states(&self) -> HashSet<&'a STATE>;
-    fn transition(&self, _: &'a STATE, _: Option<&LANG::T>) -> Option<Vec<&'a STATE>>;
+    fn transition(&self, _: &'a STATE, _: Option<&LANG::T>) -> TransitionResult<'a, STATE>;
     fn is_final(&self, state: &'a STATE) -> bool {
         self.final_states().contains(state)
     }
@@ -30,7 +72,7 @@ pub struct ConcreteNFA<'a, STATE, TF, LANG>
 where
     STATE: Hash + Eq,
     LANG: Language,
-    TF: Fn(&HashSet<&'a STATE>, &'a STATE, Option<&LANG::T>) -> Option<Vec<&'a STATE>>,
+    TF: Fn(&HashSet<&'a STATE>, &'a STATE, Option<&LANG::T>) -> TransitionResult<'a, STATE>,
 {
     language: std::marker::PhantomData<LANG>,
     states: HashSet<&'a STATE>,
@@ -43,7 +85,7 @@ impl<'a, STATE, TF, LANG> ConcreteNFA<'a, STATE, TF, LANG>
 where
     STATE: Hash + Eq,
     LANG: Language,
-    TF: Fn(&HashSet<&'a STATE>, &'a STATE, Option<&LANG::T>) -> Option<Vec<&'a STATE>>,
+    TF: Fn(&HashSet<&'a STATE>, &'a STATE, Option<&LANG::T>) -> TransitionResult<'a, STATE>,
 {
     pub fn try_new(
         states: &[&'a STATE],
@@ -76,7 +118,7 @@ impl<'a, STATE, TF, LANG> NFA<'a, STATE, TF, LANG> for ConcreteNFA<'a, STATE, TF
 where
     STATE: Hash + Eq,
     LANG: Language,
-    TF: Fn(&HashSet<&'a STATE>, &'a STATE, Option<&LANG::T>) -> Option<Vec<&'a STATE>>,
+    TF: Fn(&HashSet<&'a STATE>, &'a STATE, Option<&LANG::T>) -> TransitionResult<'a, STATE>,
 {
     fn states(&self) -> HashSet<&'a STATE> {
         self.states.clone()
@@ -94,7 +136,7 @@ where
         &self,
         current_state: &'a STATE,
         next: Option<&<LANG as Language>::T>,
-    ) -> Option<Vec<&'a STATE>> {
+    ) -> TransitionResult<'a, STATE> {
         (self.transition_func)(&self.states, current_state, next)
     }
 }
@@ -128,17 +170,17 @@ mod tests {
         states: &HashSet<&'a States>,
         current_state: &'a States,
         input: Option<&Alphabet>,
-    ) -> Option<Vec<&'a States>> {
+    ) -> TransitionResult<'a, States> {
         let a = states.get(&States::A).unwrap();
         let b = states.get(&States::B).unwrap();
         let c = states.get(&States::C).unwrap();
 
         match (current_state, input) {
-            (_, Some(Alphabet::Zero)) => Some(vec![a]),
-            (States::A, Some(Alphabet::One)) => Some(vec![b]),
-            (States::B, Some(Alphabet::One)) => Some(vec![c]),
-            (States::C, Some(Alphabet::One)) => Some(vec![c]),
-            (state, None) => Some(vec![state]),
+            (_, Some(Alphabet::Zero)) => TransitionResult::Consuming(vec![a]),
+            (States::A, Some(Alphabet::One)) => TransitionResult::Consuming(vec![b]),
+            (States::B, Some(Alphabet::One)) => TransitionResult::Consuming(vec![c]),
+            (States::C, Some(Alphabet::One)) => TransitionResult::Consuming(vec![c]),
+            (state, None) => TransitionResult::NonConsuming(vec![state]),
         }
     }
 
@@ -183,7 +225,10 @@ mod tests {
             .fold(vec![nfa.initial_state()], |curr_state, input| {
                 curr_state
                     .iter()
-                    .filter_map(|&state| nfa.transition(state, Some(input)))
+                    // calculates the transition for a non-epsilon input,
+                    // converting the result to an option where `Some`
+                    // represents all non-`DeadState` values.
+                    .filter_map(|&state| nfa.transition(state, Some(input)).ok_or_else(|| ()).ok())
                     .flatten()
                     .collect::<Vec<_>>()
             });

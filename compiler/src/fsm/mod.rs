@@ -1,8 +1,7 @@
 //! Provides methods and types to facilitate the lowering of a parsed ast into
 //! a finite state machine.
 
-mod directed_graph;
-mod unicode;
+pub(crate) mod unicode;
 
 use std::collections::hash_set::HashSet;
 use std::hash::Hash;
@@ -17,6 +16,23 @@ pub trait Language {
 
     fn contains(&self, item: &Self::T) -> bool {
         self.variants().contains(item)
+    }
+}
+
+impl Language for char {
+    type T = char;
+
+    const VARIANT_CNT: usize = unicode::AllUnicodeChars::VARIANT_CNT;
+
+    fn variants(&self) -> std::collections::HashSet<Self::T> {
+        unicode::AllUnicodeChars::new().collect()
+    }
+
+    /// Returns true signifying that the item is contained in the language set.
+    ///
+    /// For UnicodeChars, all values of char are valid.
+    fn contains(&self, _: &Self::T) -> bool {
+        true
     }
 }
 
@@ -67,7 +83,7 @@ where
     STATE: Hash + Eq,
     LANG: Language,
 {
-    fn states(&self) -> HashSet<&'a STATE>;
+    fn states(&self) -> HashSet<&STATE>;
     fn initial_state(&self) -> &'a STATE;
     fn final_states(&self) -> HashSet<&'a STATE>;
     fn transition(&self, _: &'a STATE, _: Option<&LANG::T>) -> TransitionResult<'a, STATE>;

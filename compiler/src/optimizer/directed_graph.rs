@@ -90,8 +90,8 @@ where
     NODE: Hash + Eq,
     EDGEVAL: Eq,
 {
-    dest: NODE,
-    edge_value: EDGEVAL,
+    pub dest: NODE,
+    pub edge_value: EDGEVAL,
 }
 
 impl<NODE: Hash + Eq, EDGEVAL: Eq> DirectedEdgeDestination<NODE, EDGEVAL> {

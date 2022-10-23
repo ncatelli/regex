@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 
-use crate::fsm::{Language, NFA};
 use regex_runtime::Opcode;
 
 mod directed_graph;

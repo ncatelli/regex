@@ -49,7 +49,6 @@
 pub mod ast;
 pub mod bytecode;
 pub mod compiler;
-pub mod fsm;
 pub mod opcode;
 pub mod optimizer;
 pub mod parser;

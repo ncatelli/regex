@@ -55,9 +55,9 @@ where
     NODE: Hash + Eq,
     EDGE: Eq,
 {
-    src: &'a NODE,
-    dest: &'a NODE,
-    edge_value: &'a EDGE,
+    pub src: &'a NODE,
+    pub dest: &'a NODE,
+    pub edge_value: &'a EDGE,
 }
 
 impl<'a, NODE, EDGE> DirectedEdge<'a, NODE, EDGE>

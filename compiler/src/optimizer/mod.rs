@@ -9,23 +9,11 @@ use directed_graph::{DirectedGraph, Graph};
 struct State {
     id: usize,
     kind: AcceptState,
-    expr_id: usize,
-    save_group_id: Option<usize>,
 }
 
 impl State {
-    fn new(id: usize, kind: AcceptState, expr_id: usize) -> Self {
-        Self {
-            id,
-            kind,
-            expr_id,
-            save_group_id: None,
-        }
-    }
-
-    fn with_save_group_id(mut self, save_group_id: usize) -> Self {
-        self.save_group_id = Some(save_group_id);
-        self
+    fn new(id: usize, kind: AcceptState) -> Self {
+        Self { id, kind }
     }
 }
 
@@ -42,9 +30,6 @@ impl AcceptState {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum EpsilonCondition {}
-
-#[derive(Debug, PartialEq, Eq)]
 enum EpsilonAction {
     StartSave(usize),
     EndSave(usize),
@@ -54,7 +39,7 @@ enum EpsilonAction {
 #[derive(Debug, PartialEq, Eq)]
 enum Edge {
     Epsilon,
-    EpsilonWithCondition(EpsilonCondition),
+    EpsilonWithCondition(EpsilonCond),
     EpsilonWithAction(EpsilonAction),
     MustMatchOneOf(HashSet<char>),
     MustNotMatchOneOf(HashSet<char>),
@@ -113,7 +98,7 @@ fn graph_from_bytecode(program: &Instructions) -> Result<AttributeGraph, String>
 
         for inst in &program.program {
             let state_id = inst.offset;
-            let next_state = State::new(state_id, AcceptState::NonAcceptor, 0);
+            let next_state = State::new(state_id, AcceptState::NonAcceptor);
 
             graph.add_node(next_state);
         }
@@ -144,8 +129,41 @@ fn graph_from_bytecode(program: &Instructions) -> Result<AttributeGraph, String>
                     )
                     .map_err(|e| e.to_string())?;
             }
-            Opcode::ConsumeSet(_) => todo!(),
-            Opcode::Epsilon(_) => todo!(),
+            Opcode::ConsumeSet(InstConsumeSet { idx }) => {
+                let set = program
+                    .sets
+                    .get(idx)
+                    .ok_or_else(|| format!("unknown set index: {}", idx))?;
+
+                let char_set: HashSet<char> = match &set.set {
+                    CharacterAlphabet::Range(range) => range.clone().collect(),
+                    CharacterAlphabet::Explicit(c) => c.iter().copied().collect(),
+                    CharacterAlphabet::Ranges(ranges) => {
+                        ranges.iter().flat_map(|r| r.clone()).collect()
+                    }
+                    CharacterAlphabet::UnicodeCategory(_) => todo!(),
+                };
+
+                let edge = match set.membership {
+                    SetMembership::Inclusive => Edge::MustMatchOneOf(char_set),
+                    SetMembership::Exclusive => Edge::MustNotMatchOneOf(char_set),
+                };
+
+                graph
+                    .graph
+                    .add_edge(src_state_id, default_dest_state_id, edge)
+                    .map_err(|e| e.to_string())?;
+            }
+            Opcode::Epsilon(InstEpsilon { cond }) => {
+                graph
+                    .graph
+                    .add_edge(
+                        src_state_id,
+                        default_dest_state_id,
+                        Edge::EpsilonWithCondition(cond),
+                    )
+                    .map_err(|e| e.to_string())?;
+            }
             Opcode::Split(InstSplit { x_branch, y_branch }) => {
                 let x_branch_state_id = x_branch.as_usize();
                 let y_branch_state_id = y_branch.as_usize();
@@ -224,9 +242,9 @@ mod tests {
 
         assert_eq!(
             vec![
-                &State::new(0, AcceptState::NonAcceptor, 0),
-                &State::new(1, AcceptState::NonAcceptor, 0),
-                &State::new(2, AcceptState::Acceptor, 0),
+                &State::new(0, AcceptState::NonAcceptor),
+                &State::new(1, AcceptState::NonAcceptor),
+                &State::new(2, AcceptState::Acceptor),
             ],
             states
         )
@@ -265,13 +283,16 @@ mod tests {
         let opcodes = vec![
             Opcode::Split(InstSplit::new(InstIndex::from(1), InstIndex::from(4))),
             Opcode::Any,
-            Opcode::Any,
+            Opcode::Consume(InstConsume::new('c')),
             Opcode::Match,
             Opcode::Any,
-            Opcode::Any,
+            Opcode::ConsumeSet(InstConsumeSet::new(0)),
             Opcode::Match,
         ];
-        let program = Instructions::new(vec![], opcodes);
+        let program = Instructions::new(
+            vec![CharacterSet::inclusive(CharacterAlphabet::Range('a'..='z'))],
+            opcodes,
+        );
         let res = graph_from_bytecode(&program);
 
         // safe to unwrap with above assertion.
@@ -284,9 +305,13 @@ mod tests {
                 DirectedEdge::new(&0, &1, &Edge::Epsilon),
                 DirectedEdge::new(&0, &4, &Edge::Epsilon),
                 DirectedEdge::new(&1, &2, &Edge::MatchAny),
-                DirectedEdge::new(&2, &3, &Edge::MatchAny),
+                DirectedEdge::new(&2, &3, &Edge::MustMatchOneOf(['c'].into_iter().collect())),
                 DirectedEdge::new(&4, &5, &Edge::MatchAny),
-                DirectedEdge::new(&5, &6, &Edge::MatchAny),
+                DirectedEdge::new(
+                    &5,
+                    &6,
+                    &Edge::MustMatchOneOf(('a'..='z').into_iter().collect())
+                ),
             ],
             edges
         );

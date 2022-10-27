@@ -42,11 +42,15 @@ impl AcceptState {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+enum EpsilonCondition {}
+
+#[derive(Debug, PartialEq, Eq)]
 enum Edge {
     Epsilon,
+    EpsilonWithCondition(EpsilonCondition),
     MustMatchOneOf(HashSet<char>),
     MustNotMatchOneOf(HashSet<char>),
-    Any,
+    MatchAny,
 }
 
 impl Edge {
@@ -55,7 +59,7 @@ impl Edge {
             (Edge::Epsilon, None) => true,
             (Edge::MustMatchOneOf(items), Some(other)) if items.contains(other) => true,
             (Edge::MustNotMatchOneOf(items), Some(other)) if !items.contains(other) => true,
-            (Edge::Any, Some(_)) => true,
+            (Edge::MatchAny, Some(_)) => true,
             _ => false,
         }
     }
@@ -117,7 +121,7 @@ fn graph_from_bytecode(program: &Instructions) -> Result<AttributeGraph, String>
 
                 graph
                     .graph
-                    .add_edge(src_state_id, dest_state_id, Edge::Any)
+                    .add_edge(src_state_id, dest_state_id, Edge::MatchAny)
                     .map_err(|e| e.to_string())?;
             }
             Opcode::Consume(regex_runtime::InstConsume { value }) => {
@@ -144,7 +148,14 @@ fn graph_from_bytecode(program: &Instructions) -> Result<AttributeGraph, String>
                     .add_edge(src_state_id, y_branch_state_id, Edge::Epsilon)
                     .map_err(|e| e.to_string())?;
             }
-            Opcode::Jmp(_) => todo!(),
+            Opcode::Jmp(regex_runtime::InstJmp { next }) => {
+                let next_state_id = next.as_usize();
+
+                graph
+                    .graph
+                    .add_edge(src_state_id, next_state_id, Edge::Epsilon)
+                    .map_err(|e| e.to_string())?;
+            }
             Opcode::StartSave(_) => todo!(),
             Opcode::EndSave(_) => todo!(),
             Opcode::Meta(_) => todo!(),
@@ -208,7 +219,7 @@ mod tests {
 
         assert_eq!(
             vec![
-                DirectedEdge::new(&0, &1, &Edge::Any),
+                DirectedEdge::new(&0, &1, &Edge::MatchAny),
                 DirectedEdge::new(&1, &2, &Edge::MustMatchOneOf(['a'].into_iter().collect())),
             ],
             edges
@@ -240,10 +251,10 @@ mod tests {
             vec![
                 DirectedEdge::new(&0, &1, &Edge::Epsilon),
                 DirectedEdge::new(&0, &4, &Edge::Epsilon),
-                DirectedEdge::new(&1, &2, &Edge::Any),
-                DirectedEdge::new(&2, &3, &Edge::Any),
-                DirectedEdge::new(&4, &5, &Edge::Any),
-                DirectedEdge::new(&5, &6, &Edge::Any),
+                DirectedEdge::new(&1, &2, &Edge::MatchAny),
+                DirectedEdge::new(&2, &3, &Edge::MatchAny),
+                DirectedEdge::new(&4, &5, &Edge::MatchAny),
+                DirectedEdge::new(&5, &6, &Edge::MatchAny),
             ],
             edges
         );

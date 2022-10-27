@@ -45,9 +45,17 @@ impl AcceptState {
 enum EpsilonCondition {}
 
 #[derive(Debug, PartialEq, Eq)]
+enum EpsilonAction {
+    StartSave(usize),
+    EndSave(usize),
+    SetExpressionId(u32),
+}
+
+#[derive(Debug, PartialEq, Eq)]
 enum Edge {
     Epsilon,
     EpsilonWithCondition(EpsilonCondition),
+    EpsilonWithAction(EpsilonAction),
     MustMatchOneOf(HashSet<char>),
     MustNotMatchOneOf(HashSet<char>),
     MatchAny,
@@ -115,22 +123,25 @@ fn graph_from_bytecode(program: &Instructions) -> Result<AttributeGraph, String>
 
     for inst in &program.program {
         let src_state_id = inst.offset;
+        let default_dest_state_id = src_state_id + 1;
+
         match inst.opcode {
             Opcode::Any => {
-                let dest_state_id = src_state_id + 1;
-
                 graph
                     .graph
-                    .add_edge(src_state_id, dest_state_id, Edge::MatchAny)
+                    .add_edge(src_state_id, default_dest_state_id, Edge::MatchAny)
                     .map_err(|e| e.to_string())?;
             }
             Opcode::Consume(regex_runtime::InstConsume { value }) => {
-                let dest_state_id = src_state_id + 1;
                 let set = [value].into_iter().collect();
 
                 graph
                     .graph
-                    .add_edge(src_state_id, dest_state_id, Edge::MustMatchOneOf(set))
+                    .add_edge(
+                        src_state_id,
+                        default_dest_state_id,
+                        Edge::MustMatchOneOf(set),
+                    )
                     .map_err(|e| e.to_string())?;
             }
             Opcode::ConsumeSet(_) => todo!(),
@@ -156,11 +167,33 @@ fn graph_from_bytecode(program: &Instructions) -> Result<AttributeGraph, String>
                     .add_edge(src_state_id, next_state_id, Edge::Epsilon)
                     .map_err(|e| e.to_string())?;
             }
-            Opcode::StartSave(_) => todo!(),
-            Opcode::EndSave(_) => todo!(),
-            Opcode::Meta(_) => todo!(),
+            Opcode::StartSave(regex_runtime::InstStartSave { slot_id }) => {
+                let edge = Edge::EpsilonWithAction(EpsilonAction::StartSave(slot_id));
+
+                graph
+                    .graph
+                    .add_edge(src_state_id, default_dest_state_id, edge)
+                    .map_err(|e| e.to_string())?;
+            }
+            Opcode::EndSave(regex_runtime::InstEndSave { slot_id }) => {
+                let edge = Edge::EpsilonWithAction(EpsilonAction::EndSave(slot_id));
+
+                graph
+                    .graph
+                    .add_edge(src_state_id, default_dest_state_id, edge)
+                    .map_err(|e| e.to_string())?;
+            }
+            Opcode::Meta(regex_runtime::InstMeta(regex_runtime::MetaKind::SetExpressionId(id))) => {
+                let edge = Edge::EpsilonWithAction(EpsilonAction::SetExpressionId(id));
+
+                graph
+                    .graph
+                    .add_edge(src_state_id, default_dest_state_id, edge)
+                    .map_err(|e| e.to_string())?;
+            }
             Opcode::Match => {
                 let terminal_state_id = src_state_id;
+
                 graph
                     .states_attrs
                     .entry(terminal_state_id)

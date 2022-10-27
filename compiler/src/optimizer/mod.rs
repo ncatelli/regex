@@ -78,20 +78,6 @@ impl AttributeGraph {
     }
 }
 
-struct Thread<'a> {
-    stack: Vec<usize>,
-    instructions: &'a [Instruction],
-}
-
-impl<'a> Thread<'a> {
-    fn new(stack: Vec<usize>, instructions: &'a [Instruction]) -> Self {
-        Self {
-            stack,
-            instructions,
-        }
-    }
-}
-
 fn graph_from_bytecode(program: &Instructions) -> Result<AttributeGraph, String> {
     let mut graph = {
         let mut graph = AttributeGraph::new();

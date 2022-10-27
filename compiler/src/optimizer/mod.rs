@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use regex_runtime::{InstJmp, Instruction, Instructions, Opcode};
+use regex_runtime::*;
 
 mod directed_graph;
 use directed_graph::{DirectedGraph, Graph};
@@ -132,7 +132,7 @@ fn graph_from_bytecode(program: &Instructions) -> Result<AttributeGraph, String>
                     .add_edge(src_state_id, default_dest_state_id, Edge::MatchAny)
                     .map_err(|e| e.to_string())?;
             }
-            Opcode::Consume(regex_runtime::InstConsume { value }) => {
+            Opcode::Consume(InstConsume { value }) => {
                 let set = [value].into_iter().collect();
 
                 graph
@@ -146,7 +146,7 @@ fn graph_from_bytecode(program: &Instructions) -> Result<AttributeGraph, String>
             }
             Opcode::ConsumeSet(_) => todo!(),
             Opcode::Epsilon(_) => todo!(),
-            Opcode::Split(regex_runtime::InstSplit { x_branch, y_branch }) => {
+            Opcode::Split(InstSplit { x_branch, y_branch }) => {
                 let x_branch_state_id = x_branch.as_usize();
                 let y_branch_state_id = y_branch.as_usize();
 
@@ -159,7 +159,7 @@ fn graph_from_bytecode(program: &Instructions) -> Result<AttributeGraph, String>
                     .add_edge(src_state_id, y_branch_state_id, Edge::Epsilon)
                     .map_err(|e| e.to_string())?;
             }
-            Opcode::Jmp(regex_runtime::InstJmp { next }) => {
+            Opcode::Jmp(InstJmp { next }) => {
                 let next_state_id = next.as_usize();
 
                 graph
@@ -167,7 +167,7 @@ fn graph_from_bytecode(program: &Instructions) -> Result<AttributeGraph, String>
                     .add_edge(src_state_id, next_state_id, Edge::Epsilon)
                     .map_err(|e| e.to_string())?;
             }
-            Opcode::StartSave(regex_runtime::InstStartSave { slot_id }) => {
+            Opcode::StartSave(InstStartSave { slot_id }) => {
                 let edge = Edge::EpsilonWithAction(EpsilonAction::StartSave(slot_id));
 
                 graph
@@ -175,7 +175,7 @@ fn graph_from_bytecode(program: &Instructions) -> Result<AttributeGraph, String>
                     .add_edge(src_state_id, default_dest_state_id, edge)
                     .map_err(|e| e.to_string())?;
             }
-            Opcode::EndSave(regex_runtime::InstEndSave { slot_id }) => {
+            Opcode::EndSave(InstEndSave { slot_id }) => {
                 let edge = Edge::EpsilonWithAction(EpsilonAction::EndSave(slot_id));
 
                 graph
@@ -183,7 +183,7 @@ fn graph_from_bytecode(program: &Instructions) -> Result<AttributeGraph, String>
                     .add_edge(src_state_id, default_dest_state_id, edge)
                     .map_err(|e| e.to_string())?;
             }
-            Opcode::Meta(regex_runtime::InstMeta(regex_runtime::MetaKind::SetExpressionId(id))) => {
+            Opcode::Meta(InstMeta(MetaKind::SetExpressionId(id))) => {
                 let edge = Edge::EpsilonWithAction(EpsilonAction::SetExpressionId(id));
 
                 graph
@@ -208,7 +208,6 @@ fn graph_from_bytecode(program: &Instructions) -> Result<AttributeGraph, String>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use regex_runtime::*;
 
     #[test]
     fn should_generate_terminal_state_for_consuming_instructions() {

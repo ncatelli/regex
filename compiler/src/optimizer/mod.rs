@@ -58,8 +58,8 @@ impl Edge {
         match (self, next_input) {
             (Edge::Epsilon(_), _) => true,
             (Edge::MustMatchOneOf(_), None) | (Edge::MustNotMatchOneOf(_), None) => false,
-            (Edge::MustMatchOneOf(items), Some(c)) => items.contains(&c),
-            (Edge::MustNotMatchOneOf(items), Some(c)) => items.contains(&c),
+            (Edge::MustMatchOneOf(items), Some(c)) => items.contains(c),
+            (Edge::MustNotMatchOneOf(items), Some(c)) => items.contains(c),
             (Edge::MatchAny, None) => false,
             (Edge::MatchAny, Some(_)) => true,
             (Edge::EpsilonWithCondition(_), None) => todo!(),

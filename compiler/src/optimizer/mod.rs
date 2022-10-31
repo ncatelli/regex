@@ -43,7 +43,13 @@ enum EpsilonAction {
     SetExpressionId(u32),
 }
 
-type BoxedTransitionFunc = Box<dyn Fn(Option<char>) -> bool>;
+enum TransitionFuncReturn {
+    NoMatch,
+    Consuming(usize),
+    Epsilon(usize),
+}
+
+type BoxedTransitionFunc = Box<dyn Fn(Option<char>) -> TransitionFuncReturn>;
 
 struct Edge {
     action: Option<EpsilonAction>,
@@ -51,7 +57,7 @@ struct Edge {
 }
 
 impl Edge {
-    fn new(func: impl Fn(Option<char>) -> bool + 'static) -> Self {
+    fn new(func: impl Fn(Option<char>) -> TransitionFuncReturn + 'static) -> Self {
         Self {
             action: None,
             transition_func: Box::new(func),
@@ -60,7 +66,7 @@ impl Edge {
 
     fn new_with_action(
         action: EpsilonAction,
-        func: impl Fn(Option<char>) -> bool + 'static,
+        func: impl Fn(Option<char>) -> TransitionFuncReturn + 'static,
     ) -> Self {
         Self {
             action: Some(action),
@@ -158,23 +164,26 @@ fn graph_from_runtime_instruction_set(program: &Instructions) -> Result<Attribut
 
         match inst.opcode {
             Opcode::Any => {
+                let edge = Edge::new(move |next| {
+                    next.map(|_| TransitionFuncReturn::Consuming(default_dest_state_id))
+                        .unwrap_or(TransitionFuncReturn::NoMatch)
+                });
+
                 graph
                     .edges
-                    .add_edge(
-                        src_state_id,
-                        default_dest_state_id,
-                        Edge::new(|next| next.is_some()),
-                    )
+                    .add_edge(src_state_id, default_dest_state_id, edge)
                     .map_err(|e| e.to_string())?;
             }
             Opcode::Consume(InstConsume { value }) => {
+                let edge = Edge::new(move |next| {
+                    (next == Some(value))
+                        .then_some(TransitionFuncReturn::Consuming(default_dest_state_id))
+                        .unwrap_or(TransitionFuncReturn::NoMatch)
+                });
+
                 graph
                     .edges
-                    .add_edge(
-                        src_state_id,
-                        default_dest_state_id,
-                        Edge::new(move |next| next == Some(value)),
-                    )
+                    .add_edge(src_state_id, default_dest_state_id, edge)
                     .map_err(|e| e.to_string())?;
             }
             Opcode::ConsumeSet(InstConsumeSet { idx }) => {
@@ -194,12 +203,16 @@ fn graph_from_runtime_instruction_set(program: &Instructions) -> Result<Attribut
 
                 let edge = match set.membership {
                     SetMembership::Inclusive => Edge::new(move |next| match next {
-                        Some(value) => char_set.contains(&value),
-                        None => false,
+                        Some(value) => (char_set.contains(&value))
+                            .then_some(TransitionFuncReturn::Consuming(default_dest_state_id))
+                            .unwrap_or(TransitionFuncReturn::NoMatch),
+                        None => TransitionFuncReturn::NoMatch,
                     }),
                     SetMembership::Exclusive => Edge::new(move |next| match next {
-                        Some(value) => !char_set.contains(&value),
-                        None => false,
+                        Some(value) => (!char_set.contains(&value))
+                            .then_some(TransitionFuncReturn::Consuming(default_dest_state_id))
+                            .unwrap_or(TransitionFuncReturn::NoMatch),
+                        None => TransitionFuncReturn::NoMatch,
                     }),
                 };
 
@@ -214,10 +227,10 @@ fn graph_from_runtime_instruction_set(program: &Instructions) -> Result<Attribut
                     .add_edge(
                         src_state_id,
                         default_dest_state_id,
-                        Edge::new_with_action(EpsilonAction::None, |_| {
+                        Edge::new_with_action(EpsilonAction::None, move |_| {
                             // This was the previous handling of the cond.
                             // Edge::EpsilonWithCondition(cond)
-                            true
+                            TransitionFuncReturn::Epsilon(default_dest_state_id)
                         }),
                     )
                     .map_err(|e| e.to_string())?;
@@ -225,22 +238,20 @@ fn graph_from_runtime_instruction_set(program: &Instructions) -> Result<Attribut
             Opcode::Split(InstSplit { x_branch, y_branch }) => {
                 let x_branch_state_id = x_branch.as_usize();
                 let y_branch_state_id = y_branch.as_usize();
+                let x_edge = Edge::new_with_action(EpsilonAction::None, move |_| {
+                    TransitionFuncReturn::Epsilon(x_branch_state_id)
+                });
+                let y_edge = Edge::new_with_action(EpsilonAction::None, move |_| {
+                    TransitionFuncReturn::Epsilon(x_branch_state_id)
+                });
 
                 graph
                     .edges
-                    .add_edge(
-                        src_state_id,
-                        x_branch_state_id,
-                        Edge::new_with_action(EpsilonAction::None, |_| true),
-                    )
+                    .add_edge(src_state_id, x_branch_state_id, x_edge)
                     .map_err(|e| e.to_string())?;
                 graph
                     .edges
-                    .add_edge(
-                        src_state_id,
-                        y_branch_state_id,
-                        Edge::new_with_action(EpsilonAction::None, |_| true),
-                    )
+                    .add_edge(src_state_id, y_branch_state_id, y_edge)
                     .map_err(|e| e.to_string())?;
             }
             Opcode::Jmp(InstJmp { next }) => {
@@ -251,12 +262,16 @@ fn graph_from_runtime_instruction_set(program: &Instructions) -> Result<Attribut
                     .add_edge(
                         src_state_id,
                         next_state_id,
-                        Edge::new_with_action(EpsilonAction::None, |_| true),
+                        Edge::new_with_action(EpsilonAction::None, move |_| {
+                            TransitionFuncReturn::Epsilon(default_dest_state_id)
+                        }),
                     )
                     .map_err(|e| e.to_string())?;
             }
             Opcode::StartSave(InstStartSave { slot_id }) => {
-                let edge = Edge::new_with_action(EpsilonAction::StartSave(slot_id), |_| true);
+                let edge = Edge::new_with_action(EpsilonAction::StartSave(slot_id), move |_| {
+                    TransitionFuncReturn::Epsilon(default_dest_state_id)
+                });
 
                 graph
                     .edges
@@ -264,7 +279,9 @@ fn graph_from_runtime_instruction_set(program: &Instructions) -> Result<Attribut
                     .map_err(|e| e.to_string())?;
             }
             Opcode::EndSave(InstEndSave { slot_id }) => {
-                let edge = Edge::new_with_action(EpsilonAction::EndSave(slot_id), |_| true);
+                let edge = Edge::new_with_action(EpsilonAction::EndSave(slot_id), move |_| {
+                    TransitionFuncReturn::Epsilon(default_dest_state_id)
+                });
 
                 graph
                     .edges
@@ -272,7 +289,9 @@ fn graph_from_runtime_instruction_set(program: &Instructions) -> Result<Attribut
                     .map_err(|e| e.to_string())?;
             }
             Opcode::Meta(InstMeta(MetaKind::SetExpressionId(id))) => {
-                let edge = Edge::new_with_action(EpsilonAction::SetExpressionId(id), |_| true);
+                let edge = Edge::new_with_action(EpsilonAction::SetExpressionId(id), move |_| {
+                    TransitionFuncReturn::Epsilon(default_dest_state_id)
+                });
 
                 graph
                     .edges

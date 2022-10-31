@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
+use std::ops::Range;
 
 use regex_runtime::*;
 
@@ -152,6 +153,47 @@ impl<'a> Nfa<'a, State, Edge, char> for NfaFromAttrGraph<'a> {
     }
 }
 
+struct Block {
+    span: Range<usize>,
+    initial: bool,
+    states: Vec<State>,
+    edges: Vec<Edge>,
+}
+
+fn block_spans_from_instructions(program: &Instructions) -> Vec<Range<usize>> {
+    let block_starts = {
+        let mut block_starts = [0_usize]
+            .into_iter()
+            .chain(
+                program
+                    .program
+                    .iter()
+                    .flat_map(|program| match program.opcode {
+                        Opcode::Split(InstSplit { x_branch, y_branch }) => {
+                            vec![x_branch.as_usize(), y_branch.as_usize()]
+                        }
+                        Opcode::Jmp(InstJmp { next }) => vec![next.as_usize()],
+                        _ => vec![],
+                    }),
+            )
+            .chain([program.program.len()].into_iter())
+            .collect::<Vec<_>>();
+        block_starts.sort();
+        block_starts.dedup();
+        block_starts
+    };
+
+    block_starts
+        .as_slice()
+        .windows(2)
+        .map(|window| window[0]..window[1])
+        .collect()
+}
+
+fn blocks_from_program(program: &Instructions) -> Result<AttributeGraph, String> {
+    todo!()
+}
+
 fn graph_from_runtime_instruction_set(program: &Instructions) -> Result<AttributeGraph, String> {
     let mut graph = {
         let mut graph = AttributeGraph::new();
@@ -295,24 +337,6 @@ fn graph_from_runtime_instruction_set(program: &Instructions) -> Result<Attribut
     Ok(graph)
 }
 
-fn replace_epsilon_condition_with_corresponding_states(
-    graph: AttributeGraph,
-) -> Result<AttributeGraph, String> {
-    let conditional_epsilon_transitions =
-        graph
-            .edges
-            .edges()
-            .into_iter()
-            .filter_map(|edge| match &edge.edge_value {
-                &Edge::EpsilonWithCondition(cond) => Some((cond, edge.src, edge.dest)),
-                _ => None,
-            });
-
-    for (cond, src, dest) in conditional_epsilon_transitions {}
-
-    Ok(graph)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -408,5 +432,22 @@ mod tests {
 
         // entry node plus one for each state.
         assert_eq!(7, graph.edges.nodes().len());
+    }
+
+    #[test]
+    fn should_generate_correct_block_spans() {
+        let opcodes = vec![
+            Opcode::Split(InstSplit::new(InstIndex::from(1), InstIndex::from(4))),
+            Opcode::Any,
+            Opcode::Consume(InstConsume::new('c')),
+            Opcode::Match,
+            Opcode::Any,
+            Opcode::ConsumeSet(InstConsumeSet::new(0)),
+            Opcode::Match,
+        ];
+        let program = Instructions::new(vec![], opcodes);
+        let spans = block_spans_from_instructions(&program);
+
+        assert_eq!(vec![0..1, 1..4, 4..7], spans);
     }
 }

@@ -43,33 +43,33 @@ enum EpsilonAction {
     SetExpressionId(u32),
 }
 
-#[derive(Debug, PartialEq, Eq)]
-enum Edge {
-    Epsilon(EpsilonAction),
-    /// Transitions to the next state if the condition is met. The action is
-    /// equivalent to `EpsilonAction::None`.
-    EpsilonWithCondition(EpsilonCond),
-    MustMatchOneOf(HashSet<char>),
-    MustNotMatchOneOf(HashSet<char>),
-    MatchAny,
+type BoxedTransitionFunc = Box<dyn Fn(Option<char>) -> bool>;
+
+struct Edge {
+    action: Option<EpsilonAction>,
+    transition_func: BoxedTransitionFunc,
 }
 
 impl Edge {
-    fn matches(&self, next_input: Option<&char>) -> bool {
-        match (self, next_input) {
-            (Edge::Epsilon(_), _) => true,
-            (Edge::MustMatchOneOf(_), None) | (Edge::MustNotMatchOneOf(_), None) => false,
-            (Edge::MustMatchOneOf(items), Some(c)) => items.contains(c),
-            (Edge::MustNotMatchOneOf(items), Some(c)) => items.contains(c),
-            (Edge::MatchAny, None) => false,
-            (Edge::MatchAny, Some(_)) => true,
-            (Edge::EpsilonWithCondition(_), None) => todo!(),
-            (Edge::EpsilonWithCondition(_), Some(_)) => todo!(),
+    fn new(func: impl Fn(Option<char>) -> bool + 'static) -> Self {
+        Self {
+            action: None,
+            transition_func: Box::new(func),
+        }
+    }
+
+    fn new_with_action(
+        action: EpsilonAction,
+        func: impl Fn(Option<char>) -> bool + 'static,
+    ) -> Self {
+        Self {
+            action: Some(action),
+            transition_func: Box::new(func),
         }
     }
 
     fn is_epsilon(&self) -> bool {
-        matches!(self, Edge::Epsilon(_) | Edge::EpsilonWithCondition(_))
+        self.action.is_some()
     }
 }
 
@@ -95,62 +95,6 @@ impl AttributeGraph {
 
 struct NfaFromAttrGraph<'a> {
     graph: &'a AttributeGraph,
-}
-
-impl<'a> Nfa<'a, State, Edge, char> for NfaFromAttrGraph<'a> {
-    fn states(&self) -> HashSet<&State> {
-        self.graph.states.values().collect()
-    }
-
-    fn initial_state(&self) -> Option<&'a State> {
-        self.graph.states.get(&0)
-    }
-
-    fn final_states(&self) -> HashSet<&'a State> {
-        self.graph
-            .states
-            .values()
-            .filter(|state| state.kind.is_acceptor())
-            .collect()
-    }
-
-    fn transition(
-        &self,
-        current_state: &'a State,
-        next_input: Option<&<char as Alphabet>::T>,
-    ) -> TransitionResult<'a, State> {
-        let state_id = current_state.id;
-        let edges = self.graph.edges.adjacency_table().get(&state_id);
-
-        match edges {
-            None => TransitionResult::NoMatch,
-            Some(edges) => {
-                let (matching_edges, is_epsilon) = edges
-                    .iter()
-                    .filter_map(|DirectedEdgeDestination { dest, edge_value }| {
-                        let is_epsilon = edge_value.is_epsilon();
-                        let matches = edge_value.matches(next_input);
-                        matches.then_some((dest, is_epsilon))
-                    })
-                    .fold(
-                        (Vec::new(), false),
-                        |(mut destinations, _), matching_dest| {
-                            let destination_state = self.graph.states.get(matching_dest.0).unwrap();
-                            destinations.push(destination_state);
-                            (destinations, matching_dest.1)
-                        },
-                    );
-
-                if matching_edges.is_empty() {
-                    TransitionResult::NoMatch
-                } else if is_epsilon {
-                    TransitionResult::Epsilon(matching_edges)
-                } else {
-                    TransitionResult::Match(matching_edges)
-                }
-            }
-        }
-    }
 }
 
 struct Block {
@@ -190,7 +134,7 @@ fn block_spans_from_instructions(program: &Instructions) -> Vec<Range<usize>> {
         .collect()
 }
 
-fn blocks_from_program(program: &Instructions) -> Result<AttributeGraph, String> {
+fn blocks_from_program(_program: &Instructions) -> Result<AttributeGraph, String> {
     todo!()
 }
 
@@ -216,18 +160,20 @@ fn graph_from_runtime_instruction_set(program: &Instructions) -> Result<Attribut
             Opcode::Any => {
                 graph
                     .edges
-                    .add_edge(src_state_id, default_dest_state_id, Edge::MatchAny)
+                    .add_edge(
+                        src_state_id,
+                        default_dest_state_id,
+                        Edge::new(|next| next.is_some()),
+                    )
                     .map_err(|e| e.to_string())?;
             }
             Opcode::Consume(InstConsume { value }) => {
-                let set = [value].into_iter().collect();
-
                 graph
                     .edges
                     .add_edge(
                         src_state_id,
                         default_dest_state_id,
-                        Edge::MustMatchOneOf(set),
+                        Edge::new(move |next| next == Some(value)),
                     )
                     .map_err(|e| e.to_string())?;
             }
@@ -247,8 +193,14 @@ fn graph_from_runtime_instruction_set(program: &Instructions) -> Result<Attribut
                 };
 
                 let edge = match set.membership {
-                    SetMembership::Inclusive => Edge::MustMatchOneOf(char_set),
-                    SetMembership::Exclusive => Edge::MustNotMatchOneOf(char_set),
+                    SetMembership::Inclusive => Edge::new(move |next| match next {
+                        Some(value) => char_set.contains(&value),
+                        None => false,
+                    }),
+                    SetMembership::Exclusive => Edge::new(move |next| match next {
+                        Some(value) => !char_set.contains(&value),
+                        None => false,
+                    }),
                 };
 
                 graph
@@ -256,13 +208,17 @@ fn graph_from_runtime_instruction_set(program: &Instructions) -> Result<Attribut
                     .add_edge(src_state_id, default_dest_state_id, edge)
                     .map_err(|e| e.to_string())?;
             }
-            Opcode::Epsilon(InstEpsilon { cond }) => {
+            Opcode::Epsilon(InstEpsilon { cond: _cond }) => {
                 graph
                     .edges
                     .add_edge(
                         src_state_id,
                         default_dest_state_id,
-                        Edge::EpsilonWithCondition(cond),
+                        Edge::new_with_action(EpsilonAction::None, |_| {
+                            // This was the previous handling of the cond.
+                            // Edge::EpsilonWithCondition(cond)
+                            true
+                        }),
                     )
                     .map_err(|e| e.to_string())?;
             }
@@ -275,7 +231,7 @@ fn graph_from_runtime_instruction_set(program: &Instructions) -> Result<Attribut
                     .add_edge(
                         src_state_id,
                         x_branch_state_id,
-                        Edge::Epsilon(EpsilonAction::None),
+                        Edge::new_with_action(EpsilonAction::None, |_| true),
                     )
                     .map_err(|e| e.to_string())?;
                 graph
@@ -283,7 +239,7 @@ fn graph_from_runtime_instruction_set(program: &Instructions) -> Result<Attribut
                     .add_edge(
                         src_state_id,
                         y_branch_state_id,
-                        Edge::Epsilon(EpsilonAction::None),
+                        Edge::new_with_action(EpsilonAction::None, |_| true),
                     )
                     .map_err(|e| e.to_string())?;
             }
@@ -295,12 +251,12 @@ fn graph_from_runtime_instruction_set(program: &Instructions) -> Result<Attribut
                     .add_edge(
                         src_state_id,
                         next_state_id,
-                        Edge::Epsilon(EpsilonAction::None),
+                        Edge::new_with_action(EpsilonAction::None, |_| true),
                     )
                     .map_err(|e| e.to_string())?;
             }
             Opcode::StartSave(InstStartSave { slot_id }) => {
-                let edge = Edge::Epsilon(EpsilonAction::StartSave(slot_id));
+                let edge = Edge::new_with_action(EpsilonAction::StartSave(slot_id), |_| true);
 
                 graph
                     .edges
@@ -308,7 +264,7 @@ fn graph_from_runtime_instruction_set(program: &Instructions) -> Result<Attribut
                     .map_err(|e| e.to_string())?;
             }
             Opcode::EndSave(InstEndSave { slot_id }) => {
-                let edge = Edge::Epsilon(EpsilonAction::EndSave(slot_id));
+                let edge = Edge::new_with_action(EpsilonAction::EndSave(slot_id), |_| true);
 
                 graph
                     .edges
@@ -316,7 +272,7 @@ fn graph_from_runtime_instruction_set(program: &Instructions) -> Result<Attribut
                     .map_err(|e| e.to_string())?;
             }
             Opcode::Meta(InstMeta(MetaKind::SetExpressionId(id))) => {
-                let edge = Edge::Epsilon(EpsilonAction::SetExpressionId(id));
+                let edge = Edge::new_with_action(EpsilonAction::SetExpressionId(id), |_| true);
 
                 graph
                     .edges
@@ -362,76 +318,6 @@ mod tests {
             ],
             states
         )
-    }
-
-    #[test]
-    fn should_generate_linked_edges_for_consuming_instructions() {
-        use directed_graph::DirectedEdge;
-
-        let opcodes = vec![
-            Opcode::Any,
-            Opcode::Consume(InstConsume::new('a')),
-            Opcode::Match,
-        ];
-        let program = Instructions::new(vec![], opcodes);
-        let res = graph_from_runtime_instruction_set(&program);
-
-        // safe to unwrap with above assertion.
-        let graph = res.unwrap();
-        let mut edges = graph.edges.edges();
-        edges.sort_by(|a, b| a.src.cmp(b.src));
-
-        assert_eq!(
-            vec![
-                DirectedEdge::new(&0, &1, &Edge::MatchAny),
-                DirectedEdge::new(&1, &2, &Edge::MustMatchOneOf(['a'].into_iter().collect())),
-            ],
-            edges
-        )
-    }
-
-    #[test]
-    fn should_generate_diverging_program() {
-        use directed_graph::DirectedEdge;
-
-        let opcodes = vec![
-            Opcode::Split(InstSplit::new(InstIndex::from(1), InstIndex::from(4))),
-            Opcode::Any,
-            Opcode::Consume(InstConsume::new('c')),
-            Opcode::Match,
-            Opcode::Any,
-            Opcode::ConsumeSet(InstConsumeSet::new(0)),
-            Opcode::Match,
-        ];
-        let program = Instructions::new(
-            vec![CharacterSet::inclusive(CharacterAlphabet::Range('a'..='z'))],
-            opcodes,
-        );
-        let res = graph_from_runtime_instruction_set(&program);
-
-        // safe to unwrap with above assertion.
-        let graph = res.unwrap();
-        let mut edges = graph.edges.edges();
-        edges.sort_by(|a, b| a.src.cmp(b.src));
-
-        assert_eq!(
-            vec![
-                DirectedEdge::new(&0, &1, &Edge::Epsilon(EpsilonAction::None)),
-                DirectedEdge::new(&0, &4, &Edge::Epsilon(EpsilonAction::None)),
-                DirectedEdge::new(&1, &2, &Edge::MatchAny),
-                DirectedEdge::new(&2, &3, &Edge::MustMatchOneOf(['c'].into_iter().collect())),
-                DirectedEdge::new(&4, &5, &Edge::MatchAny),
-                DirectedEdge::new(
-                    &5,
-                    &6,
-                    &Edge::MustMatchOneOf(('a'..='z').into_iter().collect())
-                ),
-            ],
-            edges
-        );
-
-        // entry node plus one for each state.
-        assert_eq!(7, graph.edges.nodes().len());
     }
 
     #[test]

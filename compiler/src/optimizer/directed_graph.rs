@@ -53,7 +53,6 @@ impl std::fmt::Display for GraphError {
 pub struct DirectedEdge<'a, NODE, EDGE>
 where
     NODE: Hash + Eq,
-    EDGE: Eq,
 {
     pub src: &'a NODE,
     pub dest: &'a NODE,
@@ -63,7 +62,6 @@ where
 impl<'a, NODE, EDGE> DirectedEdge<'a, NODE, EDGE>
 where
     NODE: Hash + Eq,
-    EDGE: Eq,
 {
     pub fn new(src: &'a NODE, dest: &'a NODE, edge_value: &'a EDGE) -> Self {
         Self {
@@ -88,13 +86,12 @@ where
 pub struct DirectedEdgeDestination<NODE, EDGEVAL>
 where
     NODE: Hash + Eq,
-    EDGEVAL: Eq,
 {
     pub dest: NODE,
     pub edge_value: EDGEVAL,
 }
 
-impl<NODE: Hash + Eq, EDGEVAL: Eq> DirectedEdgeDestination<NODE, EDGEVAL> {
+impl<NODE: Hash + Eq, EDGEVAL> DirectedEdgeDestination<NODE, EDGEVAL> {
     pub fn new(dest: NODE, edge_value: EDGEVAL) -> Self {
         Self { dest, edge_value }
     }
@@ -111,7 +108,6 @@ impl<NODE: Hash + Eq, EDGEVAL: Clone + Eq> From<DirectedEdgeDestination<NODE, ED
 pub trait Graph<NODE, EDGE>
 where
     NODE: Hash + Eq,
-    EDGE: Eq,
 {
     fn adjacency_table_mut(
         &mut self,
@@ -131,7 +127,6 @@ where
 pub struct DirectedGraph<NODE, EDGE>
 where
     NODE: Hash + Eq,
-    EDGE: Eq,
 {
     adjacency_table: HashMap<NODE, Vec<DirectedEdgeDestination<NODE, EDGE>>>,
 }
@@ -139,7 +134,6 @@ where
 impl<NODE, EDGE> DirectedGraph<NODE, EDGE>
 where
     NODE: Hash + Eq,
-    EDGE: Eq,
 {
     pub fn new() -> Self {
         Self {
@@ -151,7 +145,6 @@ where
 impl<NODE, EDGE> Default for DirectedGraph<NODE, EDGE>
 where
     NODE: Hash + Eq,
-    EDGE: Eq,
 {
     fn default() -> Self {
         Self::new()
@@ -161,7 +154,6 @@ where
 impl<NODE, EDGE> Graph<NODE, EDGE> for DirectedGraph<NODE, EDGE>
 where
     NODE: Hash + Eq,
-    EDGE: Eq,
 {
     fn adjacency_table_mut(
         &mut self,

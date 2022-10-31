@@ -140,7 +140,32 @@ fn block_spans_from_instructions(program: &Instructions) -> Vec<Range<usize>> {
         .collect()
 }
 
-fn blocks_from_program(_program: &Instructions) -> Result<AttributeGraph, String> {
+fn blocks_from_program(program: &Instructions) -> Result<AttributeGraph, String> {
+    // slice the instructions into their corresponding blocks.
+    let block_spans = block_spans_from_instructions(program);
+    let instruction_blocks = block_spans
+        .iter()
+        .map(|span| &program.program[span.clone()]);
+
+    instruction_blocks.map(|block| {
+        block.iter().map(|inst| {
+            let offset = inst.offset;
+
+            match inst.opcode {
+                Opcode::Any => todo!(),
+                Opcode::Consume(_) => todo!(),
+                Opcode::ConsumeSet(_) => todo!(),
+                Opcode::Epsilon(_) => todo!(),
+                Opcode::Split(_) => todo!(),
+                Opcode::Jmp(_) => todo!(),
+                Opcode::StartSave(_) => todo!(),
+                Opcode::EndSave(_) => todo!(),
+                Opcode::Match => todo!(),
+                Opcode::Meta(_) => todo!(),
+            }
+        })
+    });
+
     todo!()
 }
 
@@ -176,9 +201,11 @@ fn graph_from_runtime_instruction_set(program: &Instructions) -> Result<Attribut
             }
             Opcode::Consume(InstConsume { value }) => {
                 let edge = Edge::new(move |next| {
-                    (next == Some(value))
-                        .then_some(TransitionFuncReturn::Consuming(default_dest_state_id))
-                        .unwrap_or(TransitionFuncReturn::NoMatch)
+                    if next == Some(value) {
+                        TransitionFuncReturn::Consuming(default_dest_state_id)
+                    } else {
+                        TransitionFuncReturn::NoMatch
+                    }
                 });
 
                 graph
@@ -203,15 +230,23 @@ fn graph_from_runtime_instruction_set(program: &Instructions) -> Result<Attribut
 
                 let edge = match set.membership {
                     SetMembership::Inclusive => Edge::new(move |next| match next {
-                        Some(value) => (char_set.contains(&value))
-                            .then_some(TransitionFuncReturn::Consuming(default_dest_state_id))
-                            .unwrap_or(TransitionFuncReturn::NoMatch),
+                        Some(value) => {
+                            if char_set.contains(&value) {
+                                TransitionFuncReturn::Consuming(default_dest_state_id)
+                            } else {
+                                TransitionFuncReturn::NoMatch
+                            }
+                        }
                         None => TransitionFuncReturn::NoMatch,
                     }),
                     SetMembership::Exclusive => Edge::new(move |next| match next {
-                        Some(value) => (!char_set.contains(&value))
-                            .then_some(TransitionFuncReturn::Consuming(default_dest_state_id))
-                            .unwrap_or(TransitionFuncReturn::NoMatch),
+                        Some(value) => {
+                            if !char_set.contains(&value) {
+                                TransitionFuncReturn::Consuming(default_dest_state_id)
+                            } else {
+                                TransitionFuncReturn::NoMatch
+                            }
+                        }
                         None => TransitionFuncReturn::NoMatch,
                     }),
                 };

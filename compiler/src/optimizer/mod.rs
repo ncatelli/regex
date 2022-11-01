@@ -103,29 +103,52 @@ struct NfaFromAttrGraph<'a> {
     graph: &'a AttributeGraph,
 }
 
+#[derive(Default)]
 struct Block {
     span: Range<usize>,
     initial: bool,
     states: Vec<State>,
-    edges: Vec<Edge>,
+    edges: Vec<Vec<Edge>>,
+}
+
+impl Block {
+    fn new(span: Range<usize>, initial: bool, states: Vec<State>, edges: Vec<Vec<Edge>>) -> Self {
+        Self {
+            span,
+            initial,
+            states,
+            edges,
+        }
+    }
 }
 
 fn block_spans_from_instructions(program: &Instructions) -> Vec<Range<usize>> {
+    let program_len = program.program.len();
+
     let block_starts = {
         let mut block_starts = [0_usize]
             .into_iter()
-            .chain(
-                program
-                    .program
-                    .iter()
-                    .flat_map(|program| match program.opcode {
-                        Opcode::Split(InstSplit { x_branch, y_branch }) => {
+            .chain(program.program.iter().flat_map(|program| {
+                let is_last = (program.offset + 1) == program_len;
+
+                match program.opcode {
+                    Opcode::Split(InstSplit { x_branch, y_branch }) => {
+                        if is_last {
                             vec![x_branch.as_usize(), y_branch.as_usize()]
+                        } else {
+                            vec![x_branch.as_usize(), y_branch.as_usize(), program.offset + 1]
                         }
-                        Opcode::Jmp(InstJmp { next }) => vec![next.as_usize()],
-                        _ => vec![],
-                    }),
-            )
+                    }
+                    Opcode::Jmp(InstJmp { next }) => {
+                        if is_last {
+                            vec![next.as_usize()]
+                        } else {
+                            vec![next.as_usize(), program.offset + 1]
+                        }
+                    }
+                    _ => vec![],
+                }
+            }))
             .chain([program.program.len()].into_iter())
             .collect::<Vec<_>>();
         block_starts.sort();
@@ -133,40 +156,259 @@ fn block_spans_from_instructions(program: &Instructions) -> Vec<Range<usize>> {
         block_starts
     };
 
-    block_starts
-        .as_slice()
-        .windows(2)
-        .map(|window| window[0]..window[1])
-        .collect()
+    if block_starts.len() >= 2 {
+        block_starts
+            .as_slice()
+            .windows(2)
+            .map(|window| window[0]..window[1])
+            .collect()
+    } else {
+        vec![0_usize..program.program.len()]
+    }
 }
 
-fn blocks_from_program(program: &Instructions) -> Result<AttributeGraph, String> {
+/// Finds the block that contains a given id.
+fn span_matches_n_block(id: usize, spans: &[Range<usize>]) -> Option<usize> {
+    spans
+        .iter()
+        .enumerate()
+        .find_map(|(idx, span)| span.contains(&id).then_some(idx))
+}
+
+fn blocks_from_program(program: &Instructions) -> Result<Vec<Block>, String> {
     // slice the instructions into their corresponding blocks.
     let block_spans = block_spans_from_instructions(program);
     let instruction_blocks = block_spans
-        .iter()
-        .map(|span| &program.program[span.clone()]);
+        .clone()
+        .into_iter()
+        .map(|span| &program.program[span]);
 
-    instruction_blocks.map(|block| {
-        block.iter().map(|inst| {
-            let offset = inst.offset;
+    let mut blocks = Vec::with_capacity(block_spans.len());
+    for instruction_block in instruction_blocks {
+        let mut block = {
+            // safe to unwrap
+            let start = instruction_block.first().map(|inst| inst.offset).unwrap();
+            let last = instruction_block
+                .last()
+                .map(|inst| inst.offset + 1)
+                // safe to unwrap
+                .unwrap();
+
+            // Entry block will always have an instruction offset of 0.
+            let is_initial = start == 0;
+
+            Block {
+                span: start..last,
+                initial: is_initial,
+                states: vec![State::new(0, AcceptState::NonAcceptor)],
+                edges: vec![vec![]],
+            }
+        };
+
+        for inst in instruction_block {
+            let state_cnt = block.states.len();
+
+            // This should never underflow. due to above initial state declaration.
+            let src_state = state_cnt.checked_sub(1).unwrap();
+            let default_dest_state_id = state_cnt;
 
             match inst.opcode {
-                Opcode::Any => todo!(),
-                Opcode::Consume(_) => todo!(),
-                Opcode::ConsumeSet(_) => todo!(),
-                Opcode::Epsilon(_) => todo!(),
-                Opcode::Split(_) => todo!(),
-                Opcode::Jmp(_) => todo!(),
-                Opcode::StartSave(_) => todo!(),
-                Opcode::EndSave(_) => todo!(),
-                Opcode::Match => todo!(),
-                Opcode::Meta(_) => todo!(),
-            }
-        })
-    });
+                Opcode::Any => {
+                    let next_state = State::new(default_dest_state_id, AcceptState::NonAcceptor);
 
-    todo!()
+                    block.states.push(next_state);
+                    block.edges.push(vec![]);
+
+                    let edge = Edge::new(move |next| {
+                        next.map(|_| TransitionFuncReturn::Consuming(default_dest_state_id))
+                            .unwrap_or(TransitionFuncReturn::NoMatch)
+                    });
+
+                    block.edges[src_state].push(edge);
+                }
+                Opcode::Consume(InstConsume { value }) => {
+                    let next_state = State::new(default_dest_state_id, AcceptState::NonAcceptor);
+
+                    block.states.push(next_state);
+                    block.edges.push(vec![]);
+
+                    let edge = Edge::new(move |next| {
+                        if next == Some(value) {
+                            TransitionFuncReturn::Consuming(default_dest_state_id)
+                        } else {
+                            TransitionFuncReturn::NoMatch
+                        }
+                    });
+
+                    block.edges[src_state].push(edge);
+                }
+                Opcode::ConsumeSet(InstConsumeSet { idx }) => {
+                    let next_state = State::new(default_dest_state_id, AcceptState::NonAcceptor);
+
+                    block.states.push(next_state);
+                    block.edges.push(vec![]);
+
+                    let set = program
+                        .sets
+                        .get(idx)
+                        .ok_or_else(|| format!("unknown set index: {}", idx))?;
+
+                    let char_set: HashSet<char> = match &set.set {
+                        CharacterAlphabet::Range(range) => range.clone().collect(),
+                        CharacterAlphabet::Explicit(c) => c.iter().copied().collect(),
+                        CharacterAlphabet::Ranges(ranges) => {
+                            ranges.iter().flat_map(|r| r.clone()).collect()
+                        }
+                        CharacterAlphabet::UnicodeCategory(_) => todo!(),
+                    };
+
+                    let edge = match set.membership {
+                        SetMembership::Inclusive => Edge::new(move |next| match next {
+                            Some(value) => {
+                                if char_set.contains(&value) {
+                                    TransitionFuncReturn::Consuming(default_dest_state_id)
+                                } else {
+                                    TransitionFuncReturn::NoMatch
+                                }
+                            }
+                            None => TransitionFuncReturn::NoMatch,
+                        }),
+                        SetMembership::Exclusive => Edge::new(move |next| match next {
+                            Some(value) => {
+                                if !char_set.contains(&value) {
+                                    TransitionFuncReturn::Consuming(default_dest_state_id)
+                                } else {
+                                    TransitionFuncReturn::NoMatch
+                                }
+                            }
+                            None => TransitionFuncReturn::NoMatch,
+                        }),
+                    };
+
+                    block.edges[src_state].push(edge);
+                }
+                Opcode::Epsilon(InstEpsilon { cond: _cond }) => {
+                    let next_state = State::new(default_dest_state_id, AcceptState::NonAcceptor);
+
+                    block.states.push(next_state);
+                    block.edges.push(vec![]);
+
+                    let edge = Edge::new_with_action(EpsilonAction::None, move |_| {
+                        // This was the previous handling of the cond.
+                        // Edge::EpsilonWithCondition(cond)
+                        TransitionFuncReturn::Epsilon(default_dest_state_id)
+                    });
+
+                    block.edges[src_state].push(edge);
+                }
+                Opcode::Split(InstSplit { x_branch, y_branch }) => {
+                    let next_state = State::new(default_dest_state_id, AcceptState::NonAcceptor);
+
+                    let x_branch_state_id = x_branch.as_usize();
+                    let y_branch_state_id = y_branch.as_usize();
+
+                    // safe to unwrap. All ids should fall within the bounds of a span.
+                    let x_branch_block_id = span_matches_n_block(x_branch_state_id, &block_spans)
+                        .ok_or_else(|| {
+                        format!(
+                            "no matching span found for instruction {}",
+                            x_branch_state_id
+                        )
+                    })?;
+                    let y_branch_block_id = span_matches_n_block(y_branch_state_id, &block_spans)
+                        .ok_or_else(|| {
+                        format!(
+                            "no matching span found for instruction {}",
+                            y_branch_state_id
+                        )
+                    })?;
+
+                    let x_edge = Edge::new_with_action(EpsilonAction::None, move |_| {
+                        TransitionFuncReturn::Epsilon(x_branch_block_id)
+                    });
+                    let y_edge = Edge::new_with_action(EpsilonAction::None, move |_| {
+                        TransitionFuncReturn::Epsilon(y_branch_block_id)
+                    });
+
+                    block.states.push(next_state);
+                    block.edges.push(vec![]);
+
+                    block.edges[src_state].push(x_edge);
+                    block.edges[src_state].push(y_edge);
+                }
+                Opcode::Jmp(InstJmp { next }) => {
+                    let next = next.as_usize();
+                    let next_block_id =
+                        span_matches_n_block(next, &block_spans).ok_or_else(|| {
+                            format!("no matching span found for instruction {}", next)
+                        })?;
+
+                    let edge = Edge::new_with_action(EpsilonAction::None, move |_| {
+                        TransitionFuncReturn::Epsilon(next_block_id)
+                    });
+
+                    block.edges[src_state].push(edge);
+                }
+
+                Opcode::StartSave(InstStartSave { slot_id }) => {
+                    let next_state = State::new(default_dest_state_id, AcceptState::NonAcceptor);
+
+                    block.states.push(next_state);
+                    block.edges.push(vec![]);
+
+                    let edge =
+                        Edge::new_with_action(EpsilonAction::StartSave(slot_id), move |_| {
+                            TransitionFuncReturn::Epsilon(default_dest_state_id)
+                        });
+
+                    block.edges[src_state].push(edge);
+                }
+                Opcode::EndSave(InstEndSave { slot_id }) => {
+                    let next_state = State::new(default_dest_state_id, AcceptState::NonAcceptor);
+
+                    block.states.push(next_state);
+                    block.edges.push(vec![]);
+
+                    let edge = Edge::new_with_action(EpsilonAction::EndSave(slot_id), move |_| {
+                        TransitionFuncReturn::Epsilon(default_dest_state_id)
+                    });
+
+                    block.edges[src_state].push(edge);
+                }
+                Opcode::Meta(InstMeta(MetaKind::SetExpressionId(id))) => {
+                    let next_state = State::new(default_dest_state_id, AcceptState::NonAcceptor);
+
+                    block.states.push(next_state);
+                    block.edges.push(vec![]);
+
+                    let edge =
+                        Edge::new_with_action(EpsilonAction::SetExpressionId(id), move |_| {
+                            TransitionFuncReturn::Epsilon(default_dest_state_id)
+                        });
+
+                    block.edges[src_state].push(edge);
+                }
+                Opcode::Match => {
+                    let next_state = State::new(default_dest_state_id, AcceptState::Acceptor);
+
+                    block.states.push(next_state);
+                    block.edges.push(vec![]);
+
+                    let edge = Edge::new_with_action(EpsilonAction::None, move |_| {
+                        // This was the previous handling of the cond.
+                        // Edge::EpsilonWithCondition(cond)
+                        TransitionFuncReturn::Epsilon(default_dest_state_id)
+                    });
+
+                    block.edges[src_state].push(edge);
+                }
+            }
+        }
+
+        blocks.push(block);
+    }
+
+    Ok(blocks)
 }
 
 fn graph_from_runtime_instruction_set(program: &Instructions) -> Result<AttributeGraph, String> {
@@ -383,11 +625,12 @@ mod tests {
             Opcode::Match,
             Opcode::Any,
             Opcode::ConsumeSet(InstConsumeSet::new(0)),
+            Opcode::Jmp(InstJmp::new(InstIndex::from(2))),
             Opcode::Match,
         ];
         let program = Instructions::new(vec![], opcodes);
         let spans = block_spans_from_instructions(&program);
 
-        assert_eq!(vec![0..1, 1..4, 4..7], spans);
+        assert_eq!(vec![0..1, 1..2, 2..4, 4..7, 7..8], spans);
     }
 }

@@ -461,36 +461,99 @@ fn graph_from_runtime_instruction_set(program: &Instructions) -> Result<Attribut
                     .get(idx)
                     .ok_or_else(|| format!("unknown set index: {}", idx))?;
 
-                let char_set: HashSet<char> = match &set.set {
-                    CharacterAlphabet::Range(range) => range.clone().collect(),
-                    CharacterAlphabet::Explicit(c) => c.iter().copied().collect(),
-                    CharacterAlphabet::Ranges(ranges) => {
-                        ranges.iter().flat_map(|r| r.clone()).collect()
-                    }
-                    CharacterAlphabet::UnicodeCategory(_) => todo!(),
-                };
+                let edge = match (&set.set, &set.membership) {
+                    (CharacterAlphabet::Range(range), SetMembership::Inclusive) => {
+                        let char_set = range.clone();
 
-                let edge = match set.membership {
-                    SetMembership::Inclusive => Edge::new(move |next| match next {
-                        Some(value) => {
-                            if char_set.contains(&value) {
-                                TransitionFuncReturn::Consuming(default_dest_state_id)
-                            } else {
-                                TransitionFuncReturn::NoMatch
+                        Edge::new(move |next| match next {
+                            Some(value) => {
+                                if char_set.contains(&value) {
+                                    TransitionFuncReturn::Consuming(default_dest_state_id)
+                                } else {
+                                    TransitionFuncReturn::NoMatch
+                                }
                             }
-                        }
-                        None => TransitionFuncReturn::NoMatch,
-                    }),
-                    SetMembership::Exclusive => Edge::new(move |next| match next {
-                        Some(value) => {
-                            if !char_set.contains(&value) {
-                                TransitionFuncReturn::Consuming(default_dest_state_id)
-                            } else {
-                                TransitionFuncReturn::NoMatch
+                            None => TransitionFuncReturn::NoMatch,
+                        })
+                    }
+                    (CharacterAlphabet::Range(range), SetMembership::Exclusive) => {
+                        let char_set = range.clone();
+
+                        Edge::new(move |next| match next {
+                            Some(value) => {
+                                if !char_set.contains(&value) {
+                                    TransitionFuncReturn::Consuming(default_dest_state_id)
+                                } else {
+                                    TransitionFuncReturn::NoMatch
+                                }
                             }
-                        }
-                        None => TransitionFuncReturn::NoMatch,
-                    }),
+                            None => TransitionFuncReturn::NoMatch,
+                        })
+                    }
+                    (CharacterAlphabet::Explicit(c), SetMembership::Inclusive) => {
+                        let char_set = c.iter().copied().collect::<HashSet<_>>();
+
+                        Edge::new(move |next| match next {
+                            Some(value) => {
+                                if char_set.contains(&value) {
+                                    TransitionFuncReturn::Consuming(default_dest_state_id)
+                                } else {
+                                    TransitionFuncReturn::NoMatch
+                                }
+                            }
+                            None => TransitionFuncReturn::NoMatch,
+                        })
+                    }
+                    (CharacterAlphabet::Explicit(c), SetMembership::Exclusive) => {
+                        let char_set = c.iter().copied().collect::<HashSet<_>>();
+
+                        Edge::new(move |next| match next {
+                            Some(value) => {
+                                if !char_set.contains(&value) {
+                                    TransitionFuncReturn::Consuming(default_dest_state_id)
+                                } else {
+                                    TransitionFuncReturn::NoMatch
+                                }
+                            }
+                            None => TransitionFuncReturn::NoMatch,
+                        })
+                    }
+                    (CharacterAlphabet::Ranges(ranges), SetMembership::Inclusive) => {
+                        let char_set = ranges
+                            .iter()
+                            .flat_map(|r| r.clone())
+                            .collect::<HashSet<_>>();
+
+                        Edge::new(move |next| match next {
+                            Some(value) => {
+                                if char_set.contains(&value) {
+                                    TransitionFuncReturn::Consuming(default_dest_state_id)
+                                } else {
+                                    TransitionFuncReturn::NoMatch
+                                }
+                            }
+                            None => TransitionFuncReturn::NoMatch,
+                        })
+                    }
+                    (CharacterAlphabet::Ranges(ranges), SetMembership::Exclusive) => {
+                        let char_set = ranges
+                            .iter()
+                            .flat_map(|r| r.clone())
+                            .collect::<HashSet<_>>();
+
+                        Edge::new(move |next| match next {
+                            Some(value) => {
+                                if !char_set.contains(&value) {
+                                    TransitionFuncReturn::Consuming(default_dest_state_id)
+                                } else {
+                                    TransitionFuncReturn::NoMatch
+                                }
+                            }
+                            None => TransitionFuncReturn::NoMatch,
+                        })
+                    }
+                    (CharacterAlphabet::UnicodeCategory(_), SetMembership::Inclusive) => todo!(),
+                    (CharacterAlphabet::UnicodeCategory(_), SetMembership::Exclusive) => todo!(),
                 };
 
                 graph

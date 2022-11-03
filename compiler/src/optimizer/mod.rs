@@ -51,12 +51,12 @@ enum TransitionFuncReturn {
 
 type BoxedTransitionFunc = Box<dyn Fn(Option<char>) -> TransitionFuncReturn>;
 
-struct Edge {
+struct RelativeEdge {
     action: Option<EpsilonAction>,
     transition_func: BoxedTransitionFunc,
 }
 
-impl Edge {
+impl RelativeEdge {
     fn new(func: impl Fn(Option<char>) -> TransitionFuncReturn + 'static) -> Self {
         Self {
             action: None,
@@ -74,33 +74,43 @@ impl Edge {
         }
     }
 
+    fn into_offset_edge(self, offset: usize) -> OffsetEdge {
+        let action = self.action;
+
+        let transition_func = move |next| {
+            let transition = (*self.transition_func)(next);
+
+            match transition {
+                TransitionFuncReturn::Consuming(next) => {
+                    TransitionFuncReturn::Consuming(next + offset)
+                }
+                TransitionFuncReturn::Epsilon(next) => TransitionFuncReturn::Epsilon(next + offset),
+                other => other,
+            }
+        };
+
+        OffsetEdge {
+            offset,
+            action,
+            transition_func: Box::new(transition_func),
+        }
+    }
+}
+
+struct OffsetEdge {
+    offset: usize,
+    action: Option<EpsilonAction>,
+    transition_func: BoxedTransitionFunc,
+}
+
+impl OffsetEdge {
     fn is_epsilon(&self) -> bool {
         self.action.is_some()
     }
 }
 
-struct AttributeGraph {
-    edges: DirectedGraph<usize, Edge>,
-    states: HashMap<usize, State>,
-}
-
-impl AttributeGraph {
-    fn new() -> Self {
-        Self {
-            edges: Default::default(),
-            states: Default::default(),
-        }
-    }
-
-    fn add_node(&mut self, node: State) -> bool {
-        let state_id = node.id;
-        self.states.insert(state_id, node);
-        self.edges.add_node(state_id)
-    }
-}
-
 struct NfaFromAttrGraph<'a> {
-    graph: &'a AttributeGraph,
+    graph: &'a DirectedGraph<State, OffsetEdge>,
 }
 
 #[derive(Default)]
@@ -108,11 +118,16 @@ struct Block {
     span: Range<usize>,
     initial: bool,
     states: Vec<State>,
-    edges: Vec<Vec<Edge>>,
+    edges: Vec<Vec<RelativeEdge>>,
 }
 
 impl Block {
-    fn new(span: Range<usize>, initial: bool, states: Vec<State>, edges: Vec<Vec<Edge>>) -> Self {
+    fn new(
+        span: Range<usize>,
+        initial: bool,
+        states: Vec<State>,
+        edges: Vec<Vec<RelativeEdge>>,
+    ) -> Self {
         Self {
             span,
             initial,
@@ -219,7 +234,7 @@ fn blocks_from_program(program: &Instructions) -> Result<Vec<Block>, String> {
                     block.states.push(next_state);
                     block.edges.push(vec![]);
 
-                    let edge = Edge::new(move |next| {
+                    let edge = RelativeEdge::new(move |next| {
                         next.map(|_| TransitionFuncReturn::Consuming(default_dest_state_id))
                             .unwrap_or(TransitionFuncReturn::NoMatch)
                     });
@@ -232,7 +247,7 @@ fn blocks_from_program(program: &Instructions) -> Result<Vec<Block>, String> {
                     block.states.push(next_state);
                     block.edges.push(vec![]);
 
-                    let edge = Edge::new(move |next| {
+                    let edge = RelativeEdge::new(move |next| {
                         if next == Some(value) {
                             TransitionFuncReturn::Consuming(default_dest_state_id)
                         } else {
@@ -263,7 +278,7 @@ fn blocks_from_program(program: &Instructions) -> Result<Vec<Block>, String> {
                     };
 
                     let edge = match set.membership {
-                        SetMembership::Inclusive => Edge::new(move |next| match next {
+                        SetMembership::Inclusive => RelativeEdge::new(move |next| match next {
                             Some(value) => {
                                 if char_set.contains(&value) {
                                     TransitionFuncReturn::Consuming(default_dest_state_id)
@@ -273,7 +288,7 @@ fn blocks_from_program(program: &Instructions) -> Result<Vec<Block>, String> {
                             }
                             None => TransitionFuncReturn::NoMatch,
                         }),
-                        SetMembership::Exclusive => Edge::new(move |next| match next {
+                        SetMembership::Exclusive => RelativeEdge::new(move |next| match next {
                             Some(value) => {
                                 if !char_set.contains(&value) {
                                     TransitionFuncReturn::Consuming(default_dest_state_id)
@@ -288,18 +303,7 @@ fn blocks_from_program(program: &Instructions) -> Result<Vec<Block>, String> {
                     block.edges[src_state].push(edge);
                 }
                 Opcode::Epsilon(InstEpsilon { cond: _cond }) => {
-                    let next_state = State::new(default_dest_state_id, AcceptState::NonAcceptor);
-
-                    block.states.push(next_state);
-                    block.edges.push(vec![]);
-
-                    let edge = Edge::new_with_action(EpsilonAction::None, move |_| {
-                        // This was the previous handling of the cond.
-                        // Edge::EpsilonWithCondition(cond)
-                        TransitionFuncReturn::Epsilon(default_dest_state_id)
-                    });
-
-                    block.edges[src_state].push(edge);
+                    todo!()
                 }
                 Opcode::Split(InstSplit { x_branch, y_branch }) => {
                     let next_state = State::new(default_dest_state_id, AcceptState::NonAcceptor);
@@ -323,10 +327,10 @@ fn blocks_from_program(program: &Instructions) -> Result<Vec<Block>, String> {
                         )
                     })?;
 
-                    let x_edge = Edge::new_with_action(EpsilonAction::None, move |_| {
+                    let x_edge = RelativeEdge::new_with_action(EpsilonAction::None, move |_| {
                         TransitionFuncReturn::Epsilon(x_branch_block_id)
                     });
-                    let y_edge = Edge::new_with_action(EpsilonAction::None, move |_| {
+                    let y_edge = RelativeEdge::new_with_action(EpsilonAction::None, move |_| {
                         TransitionFuncReturn::Epsilon(y_branch_block_id)
                     });
 
@@ -343,7 +347,7 @@ fn blocks_from_program(program: &Instructions) -> Result<Vec<Block>, String> {
                             format!("no matching span found for instruction {}", next)
                         })?;
 
-                    let edge = Edge::new_with_action(EpsilonAction::None, move |_| {
+                    let edge = RelativeEdge::new_with_action(EpsilonAction::None, move |_| {
                         TransitionFuncReturn::Epsilon(next_block_id)
                     });
 
@@ -356,10 +360,10 @@ fn blocks_from_program(program: &Instructions) -> Result<Vec<Block>, String> {
                     block.states.push(next_state);
                     block.edges.push(vec![]);
 
-                    let edge =
-                        Edge::new_with_action(EpsilonAction::StartSave(slot_id), move |_| {
-                            TransitionFuncReturn::Epsilon(default_dest_state_id)
-                        });
+                    let edge = RelativeEdge::new_with_action(
+                        EpsilonAction::StartSave(slot_id),
+                        move |_| TransitionFuncReturn::Epsilon(default_dest_state_id),
+                    );
 
                     block.edges[src_state].push(edge);
                 }
@@ -369,9 +373,10 @@ fn blocks_from_program(program: &Instructions) -> Result<Vec<Block>, String> {
                     block.states.push(next_state);
                     block.edges.push(vec![]);
 
-                    let edge = Edge::new_with_action(EpsilonAction::EndSave(slot_id), move |_| {
-                        TransitionFuncReturn::Epsilon(default_dest_state_id)
-                    });
+                    let edge =
+                        RelativeEdge::new_with_action(EpsilonAction::EndSave(slot_id), move |_| {
+                            TransitionFuncReturn::Epsilon(default_dest_state_id)
+                        });
 
                     block.edges[src_state].push(edge);
                 }
@@ -381,10 +386,10 @@ fn blocks_from_program(program: &Instructions) -> Result<Vec<Block>, String> {
                     block.states.push(next_state);
                     block.edges.push(vec![]);
 
-                    let edge =
-                        Edge::new_with_action(EpsilonAction::SetExpressionId(id), move |_| {
-                            TransitionFuncReturn::Epsilon(default_dest_state_id)
-                        });
+                    let edge = RelativeEdge::new_with_action(
+                        EpsilonAction::SetExpressionId(id),
+                        move |_| TransitionFuncReturn::Epsilon(default_dest_state_id),
+                    );
 
                     block.edges[src_state].push(edge);
                 }
@@ -394,7 +399,7 @@ fn blocks_from_program(program: &Instructions) -> Result<Vec<Block>, String> {
                     block.states.push(next_state);
                     block.edges.push(vec![]);
 
-                    let edge = Edge::new_with_action(EpsilonAction::None, move |_| {
+                    let edge = RelativeEdge::new_with_action(EpsilonAction::None, move |_| {
                         // This was the previous handling of the cond.
                         // Edge::EpsilonWithCondition(cond)
                         TransitionFuncReturn::Epsilon(default_dest_state_id)
@@ -411,242 +416,42 @@ fn blocks_from_program(program: &Instructions) -> Result<Vec<Block>, String> {
     Ok(blocks)
 }
 
-fn graph_from_runtime_instruction_set(program: &Instructions) -> Result<AttributeGraph, String> {
-    let mut graph = {
-        let mut graph = AttributeGraph::new();
+fn graph_from_runtime_instruction_set(
+    program: &Instructions,
+) -> Result<HashMap<State, Vec<OffsetEdge>>, String> {
+    let mut graph = HashMap::new();
 
-        for inst in &program.program {
-            let state_id = inst.offset;
-            let next_state = State::new(state_id, AcceptState::NonAcceptor);
+    let blocks = blocks_from_program(program)?;
+    let (block_offsets, _) = blocks.iter().map(|block| block.states.len()).fold(
+        (vec![], 0),
+        |(mut acc, offset), block_len| {
+            acc.push(offset);
+            (acc, offset + block_len)
+        },
+    );
 
-            graph.add_node(next_state);
+    let mut states = vec![];
+    let mut edges = vec![];
+    for (block_idx, block) in blocks.into_iter().enumerate() {
+        let block_offset = block_offsets[block_idx];
+        let block_states = block.states.into_iter();
+        let block_edges = block.edges.into_iter();
+
+        for (state, local_state_edges) in block_states.zip(block_edges) {
+            let absolute_idx_state = State::new(block_offset + state.id, state.kind);
+            states.push(absolute_idx_state);
+
+            let local_edges = local_state_edges
+                .into_iter()
+                .map(|edge| edge.into_offset_edge(block_offset))
+                .collect::<Vec<_>>();
+
+            edges.push(local_edges)
         }
+    }
 
-        graph
-    };
-
-    for inst in &program.program {
-        let src_state_id = inst.offset;
-        let default_dest_state_id = src_state_id + 1;
-
-        match inst.opcode {
-            Opcode::Any => {
-                let edge = Edge::new(move |next| {
-                    next.map(|_| TransitionFuncReturn::Consuming(default_dest_state_id))
-                        .unwrap_or(TransitionFuncReturn::NoMatch)
-                });
-
-                graph
-                    .edges
-                    .add_edge(src_state_id, default_dest_state_id, edge)
-                    .map_err(|e| e.to_string())?;
-            }
-            Opcode::Consume(InstConsume { value }) => {
-                let edge = Edge::new(move |next| {
-                    if next == Some(value) {
-                        TransitionFuncReturn::Consuming(default_dest_state_id)
-                    } else {
-                        TransitionFuncReturn::NoMatch
-                    }
-                });
-
-                graph
-                    .edges
-                    .add_edge(src_state_id, default_dest_state_id, edge)
-                    .map_err(|e| e.to_string())?;
-            }
-            Opcode::ConsumeSet(InstConsumeSet { idx }) => {
-                let set = program
-                    .sets
-                    .get(idx)
-                    .ok_or_else(|| format!("unknown set index: {}", idx))?;
-
-                let edge = match (&set.set, &set.membership) {
-                    (CharacterAlphabet::Range(range), SetMembership::Inclusive) => {
-                        let char_set = range.clone();
-
-                        Edge::new(move |next| match next {
-                            Some(value) => {
-                                if char_set.contains(&value) {
-                                    TransitionFuncReturn::Consuming(default_dest_state_id)
-                                } else {
-                                    TransitionFuncReturn::NoMatch
-                                }
-                            }
-                            None => TransitionFuncReturn::NoMatch,
-                        })
-                    }
-                    (CharacterAlphabet::Range(range), SetMembership::Exclusive) => {
-                        let char_set = range.clone();
-
-                        Edge::new(move |next| match next {
-                            Some(value) => {
-                                if !char_set.contains(&value) {
-                                    TransitionFuncReturn::Consuming(default_dest_state_id)
-                                } else {
-                                    TransitionFuncReturn::NoMatch
-                                }
-                            }
-                            None => TransitionFuncReturn::NoMatch,
-                        })
-                    }
-                    (CharacterAlphabet::Explicit(c), SetMembership::Inclusive) => {
-                        let char_set = c.iter().copied().collect::<HashSet<_>>();
-
-                        Edge::new(move |next| match next {
-                            Some(value) => {
-                                if char_set.contains(&value) {
-                                    TransitionFuncReturn::Consuming(default_dest_state_id)
-                                } else {
-                                    TransitionFuncReturn::NoMatch
-                                }
-                            }
-                            None => TransitionFuncReturn::NoMatch,
-                        })
-                    }
-                    (CharacterAlphabet::Explicit(c), SetMembership::Exclusive) => {
-                        let char_set = c.iter().copied().collect::<HashSet<_>>();
-
-                        Edge::new(move |next| match next {
-                            Some(value) => {
-                                if !char_set.contains(&value) {
-                                    TransitionFuncReturn::Consuming(default_dest_state_id)
-                                } else {
-                                    TransitionFuncReturn::NoMatch
-                                }
-                            }
-                            None => TransitionFuncReturn::NoMatch,
-                        })
-                    }
-                    (CharacterAlphabet::Ranges(ranges), SetMembership::Inclusive) => {
-                        let char_set = ranges
-                            .iter()
-                            .flat_map(|r| r.clone())
-                            .collect::<HashSet<_>>();
-
-                        Edge::new(move |next| match next {
-                            Some(value) => {
-                                if char_set.contains(&value) {
-                                    TransitionFuncReturn::Consuming(default_dest_state_id)
-                                } else {
-                                    TransitionFuncReturn::NoMatch
-                                }
-                            }
-                            None => TransitionFuncReturn::NoMatch,
-                        })
-                    }
-                    (CharacterAlphabet::Ranges(ranges), SetMembership::Exclusive) => {
-                        let char_set = ranges
-                            .iter()
-                            .flat_map(|r| r.clone())
-                            .collect::<HashSet<_>>();
-
-                        Edge::new(move |next| match next {
-                            Some(value) => {
-                                if !char_set.contains(&value) {
-                                    TransitionFuncReturn::Consuming(default_dest_state_id)
-                                } else {
-                                    TransitionFuncReturn::NoMatch
-                                }
-                            }
-                            None => TransitionFuncReturn::NoMatch,
-                        })
-                    }
-                    (CharacterAlphabet::UnicodeCategory(_), SetMembership::Inclusive) => todo!(),
-                    (CharacterAlphabet::UnicodeCategory(_), SetMembership::Exclusive) => todo!(),
-                };
-
-                graph
-                    .edges
-                    .add_edge(src_state_id, default_dest_state_id, edge)
-                    .map_err(|e| e.to_string())?;
-            }
-            Opcode::Epsilon(InstEpsilon { cond: _cond }) => {
-                graph
-                    .edges
-                    .add_edge(
-                        src_state_id,
-                        default_dest_state_id,
-                        Edge::new_with_action(EpsilonAction::None, move |_| {
-                            // This was the previous handling of the cond.
-                            // Edge::EpsilonWithCondition(cond)
-                            TransitionFuncReturn::Epsilon(default_dest_state_id)
-                        }),
-                    )
-                    .map_err(|e| e.to_string())?;
-            }
-            Opcode::Split(InstSplit { x_branch, y_branch }) => {
-                let x_branch_state_id = x_branch.as_usize();
-                let y_branch_state_id = y_branch.as_usize();
-                let x_edge = Edge::new_with_action(EpsilonAction::None, move |_| {
-                    TransitionFuncReturn::Epsilon(x_branch_state_id)
-                });
-                let y_edge = Edge::new_with_action(EpsilonAction::None, move |_| {
-                    TransitionFuncReturn::Epsilon(x_branch_state_id)
-                });
-
-                graph
-                    .edges
-                    .add_edge(src_state_id, x_branch_state_id, x_edge)
-                    .map_err(|e| e.to_string())?;
-                graph
-                    .edges
-                    .add_edge(src_state_id, y_branch_state_id, y_edge)
-                    .map_err(|e| e.to_string())?;
-            }
-            Opcode::Jmp(InstJmp { next }) => {
-                let next_state_id = next.as_usize();
-
-                graph
-                    .edges
-                    .add_edge(
-                        src_state_id,
-                        next_state_id,
-                        Edge::new_with_action(EpsilonAction::None, move |_| {
-                            TransitionFuncReturn::Epsilon(default_dest_state_id)
-                        }),
-                    )
-                    .map_err(|e| e.to_string())?;
-            }
-            Opcode::StartSave(InstStartSave { slot_id }) => {
-                let edge = Edge::new_with_action(EpsilonAction::StartSave(slot_id), move |_| {
-                    TransitionFuncReturn::Epsilon(default_dest_state_id)
-                });
-
-                graph
-                    .edges
-                    .add_edge(src_state_id, default_dest_state_id, edge)
-                    .map_err(|e| e.to_string())?;
-            }
-            Opcode::EndSave(InstEndSave { slot_id }) => {
-                let edge = Edge::new_with_action(EpsilonAction::EndSave(slot_id), move |_| {
-                    TransitionFuncReturn::Epsilon(default_dest_state_id)
-                });
-
-                graph
-                    .edges
-                    .add_edge(src_state_id, default_dest_state_id, edge)
-                    .map_err(|e| e.to_string())?;
-            }
-            Opcode::Meta(InstMeta(MetaKind::SetExpressionId(id))) => {
-                let edge = Edge::new_with_action(EpsilonAction::SetExpressionId(id), move |_| {
-                    TransitionFuncReturn::Epsilon(default_dest_state_id)
-                });
-
-                graph
-                    .edges
-                    .add_edge(src_state_id, default_dest_state_id, edge)
-                    .map_err(|e| e.to_string())?;
-            }
-            Opcode::Match => {
-                let terminal_state_id = src_state_id;
-
-                graph
-                    .states
-                    .entry(terminal_state_id)
-                    .and_modify(|state| state.kind = AcceptState::Acceptor);
-            }
-        }
+    for state in states {
+        graph.insert(state, vec![]);
     }
 
     Ok(graph)
@@ -666,14 +471,15 @@ mod tests {
 
         // safe to unwrap with above assertion.
         let graph = res.unwrap();
-        let mut states = graph.states.values().collect::<Vec<_>>();
+        let mut states = graph.keys().collect::<Vec<_>>();
         states.sort_by(|a, b| a.id.cmp(&b.id));
 
         assert_eq!(
             vec![
                 &State::new(0, AcceptState::NonAcceptor),
                 &State::new(1, AcceptState::NonAcceptor),
-                &State::new(2, AcceptState::Acceptor),
+                &State::new(2, AcceptState::NonAcceptor),
+                &State::new(3, AcceptState::Acceptor),
             ],
             states
         )

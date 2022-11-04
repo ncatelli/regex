@@ -4,12 +4,8 @@ use std::ops::Range;
 
 use regex_runtime::*;
 
-mod directed_graph;
 mod nfa;
-use directed_graph::{DirectedGraph, Graph};
 use nfa::{Alphabet, Nfa, TransitionResult};
-
-use self::directed_graph::DirectedEdgeDestination;
 
 #[derive(Debug, Hash, PartialEq, Eq)]
 struct State {
@@ -107,10 +103,6 @@ impl OffsetEdge {
     fn is_epsilon(&self) -> bool {
         self.action.is_some()
     }
-}
-
-struct NfaFromAttrGraph<'a> {
-    graph: &'a DirectedGraph<State, OffsetEdge>,
 }
 
 #[derive(Default)]
@@ -416,11 +408,23 @@ fn blocks_from_program(program: &Instructions) -> Result<Vec<Block>, String> {
     Ok(blocks)
 }
 
+struct DirectedGraphWithTransitionFuncs {
+    mappings: HashMap<State, Vec<OffsetEdge>>,
+}
+
+impl DirectedGraphWithTransitionFuncs {
+    fn new(mappings: HashMap<State, Vec<OffsetEdge>>) -> Self {
+        Self { mappings }
+    }
+
+    fn nodes(&self) -> Vec<&State> {
+        self.mappings.keys().collect()
+    }
+}
+
 fn graph_from_runtime_instruction_set(
     program: &Instructions,
-) -> Result<HashMap<State, Vec<OffsetEdge>>, String> {
-    let mut graph = HashMap::new();
-
+) -> Result<DirectedGraphWithTransitionFuncs, String> {
     let blocks = blocks_from_program(program)?;
     let (block_offsets, _) = blocks.iter().map(|block| block.states.len()).fold(
         (vec![], 0),
@@ -450,11 +454,13 @@ fn graph_from_runtime_instruction_set(
         }
     }
 
-    for state in states {
-        graph.insert(state, vec![]);
-    }
+    let state_edge_pairs = states.into_iter().zip(edges.into_iter());
+    let graph = state_edge_pairs.fold(HashMap::new(), |mut acc, (state, edge)| {
+        acc.insert(state, edge);
+        acc
+    });
 
-    Ok(graph)
+    Ok(DirectedGraphWithTransitionFuncs::new(graph))
 }
 
 #[cfg(test)]
@@ -471,7 +477,7 @@ mod tests {
 
         // safe to unwrap with above assertion.
         let graph = res.unwrap();
-        let mut states = graph.keys().collect::<Vec<_>>();
+        let mut states = graph.nodes();
         states.sort_by(|a, b| a.id.cmp(&b.id));
 
         assert_eq!(

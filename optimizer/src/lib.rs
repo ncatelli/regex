@@ -428,7 +428,8 @@ fn blocks_from_program(program: &Instructions) -> Result<Vec<Block>, String> {
     Ok(blocks)
 }
 
-struct DirectedGraphWithTransitionFuncs {
+/// Provides a mapping of states to their corresponding Edge fuctions.
+pub struct DirectedGraphWithTransitionFuncs {
     mappings: HashMap<State, Vec<EdgeTransitionFunc>>,
 }
 
@@ -440,11 +441,46 @@ impl DirectedGraphWithTransitionFuncs {
     fn nodes(&self) -> Vec<&State> {
         self.mappings.keys().collect()
     }
+
+    fn adjacency_table(&self) -> &HashMap<State, Vec<EdgeTransitionFunc>> {
+        &self.mappings
+    }
+
+    fn adjacency_table_mut(&mut self) -> &mut HashMap<State, Vec<EdgeTransitionFunc>> {
+        &mut self.mappings
+    }
+
+    fn node_by_id(&self, id: usize) -> Option<&State> {
+        let state = self
+            .mappings
+            .get_key_value(&State {
+                id,
+                kind: AcceptState::NonAcceptor,
+            })
+            .map(|(k, _)| k);
+
+        if state.is_some() {
+            state
+        } else {
+            self.mappings
+                .get_key_value(&State {
+                    id,
+                    kind: AcceptState::Acceptor,
+                })
+                .map(|(k, _)| k)
+        }
+    }
+
+    fn edges_by_id(&self, id: usize) -> Option<&Vec<EdgeTransitionFunc>> {
+        let state = self.node_by_id(id)?;
+
+        self.mappings.get(state)
+    }
 }
 
 struct TransitionTable<ALPHABET: Alphabet> {
     alphabet: std::marker::PhantomData<ALPHABET>,
-    mappings: Vec<Vec<TransitionFuncReturn>>,
+    mappings: Vec<Vec<Option<usize>>>,
     char_to_index_mapping: HashMap<ALPHABET::T, usize>,
 }
 
@@ -454,7 +490,7 @@ impl TransitionTable<char> {
     fn new(states: usize) -> Self {
         let variant_count = char::VARIANT_CNT + 1;
 
-        let mappings = vec![vec![TransitionFuncReturn::NoMatch; states]; variant_count];
+        let mappings = vec![vec![None; states]; variant_count];
         let char_to_index_mapping = char::variants()
             .enumerate()
             .map(|(idx, variant)| (variant, idx))
@@ -467,26 +503,27 @@ impl TransitionTable<char> {
         }
     }
 
-    fn epsilon_column(&self) -> &[TransitionFuncReturn] {
+    fn epsilon_column(&self) -> &[Option<usize>] {
         &self.mappings[Self::EPSILON_COLUMN]
     }
 
-    fn non_epsilon_columns(&self) -> &[Vec<TransitionFuncReturn>] {
+    fn non_epsilon_columns(&self) -> &[Vec<Option<usize>>] {
         &self.mappings[0..Self::EPSILON_COLUMN]
     }
 
-    fn update_result(&mut self, state_id: usize, variant: &char, new_val: TransitionFuncReturn) {
+    fn update_result(&mut self, state_id: usize, variant: &char, new_val: Option<usize>) {
         let variant_idx = self.char_to_index_mapping.get(variant).unwrap();
         self.mappings[*variant_idx][state_id] = new_val;
     }
 }
 
-impl<ALPHABET: Alphabet> AsRef<[Vec<TransitionFuncReturn>]> for TransitionTable<ALPHABET> {
-    fn as_ref(&self) -> &[Vec<TransitionFuncReturn>] {
+impl<ALPHABET: Alphabet> AsRef<[Vec<Option<usize>>]> for TransitionTable<ALPHABET> {
+    fn as_ref(&self) -> &[Vec<Option<usize>>] {
         &self.mappings
     }
 }
 
+/// Generates a directed graph from a given program.
 fn graph_from_runtime_instruction_set(
     program: &Instructions,
 ) -> Result<DirectedGraphWithTransitionFuncs, String> {
@@ -528,8 +565,125 @@ fn graph_from_runtime_instruction_set(
     Ok(DirectedGraphWithTransitionFuncs::new(graph))
 }
 
+/// Provides the types for constructing an nfa from a type.
+pub trait NfaConstructable {
+    type Input;
+    type Output;
+    type Error;
+
+    fn build_nfa(input: Self::Input) -> Result<Self::Output, Self::Error>;
+}
+
+pub struct UnicodeNfa<'a> {
+    states: Vec<&'a State>,
+    transition_table: TransitionTable<char>,
+}
+
+impl<'a> Nfa<'a, State, char> for UnicodeNfa<'a> {
+    fn is_final(&self, state: &'a State) -> bool {
+        self.final_states().contains(state)
+    }
+
+    fn states(&self) -> HashSet<&State> {
+        self.states.iter().copied().collect()
+    }
+
+    fn initial_state(&self) -> Option<&'a State> {
+        self.states.iter().copied().find(|state| state.id == 0)
+    }
+
+    fn final_states(&self) -> HashSet<&'a State> {
+        self.states
+            .iter()
+            .copied()
+            .filter(|state| state.kind == AcceptState::Acceptor)
+            .collect()
+    }
+
+    fn transition(
+        &self,
+        current_state: &'a State,
+        next_input: Option<&char>,
+    ) -> TransitionResult<'a, State> {
+        let row_idx = current_state.id;
+
+        match next_input {
+            None => {
+                let tfr = self.transition_table.epsilon_column()[row_idx];
+
+                match tfr {
+                    None => TransitionResult::NoMatch,
+                    Some(next) => {
+                        let state = self.states.iter().find(|state| state.id == next).unwrap();
+                        TransitionResult::Epsilon(vec![state])
+                    }
+                }
+            }
+            Some(c) => {
+                // safe to guarantee this can be unwrapped for char.
+                let column_idx = self.transition_table.char_to_index_mapping.get(c).unwrap();
+                let tfr = self.transition_table.non_epsilon_columns()[*column_idx][row_idx];
+
+                match tfr {
+                    None => TransitionResult::NoMatch,
+                    Some(next) => {
+                        let state = self.states.iter().find(|state| state.id == next).unwrap();
+                        TransitionResult::Match(vec![state])
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl<'a> NfaConstructable for UnicodeNfa<'a> {
+    type Input = &'a DirectedGraphWithTransitionFuncs;
+    type Output = Self;
+    type Error = String;
+
+    fn build_nfa(input: Self::Input) -> Result<Self::Output, Self::Error> {
+        let graph = input;
+
+        let states = graph.nodes();
+
+        let transition_table = {
+            let mut transition_table = TransitionTable::<char>::new(states.len());
+
+            // safe to unwrap with above assertion.
+            let empty_transition_funcs = vec![];
+            for state in states.iter() {
+                let transition_funcs = graph
+                    .edges_by_id(state.id)
+                    .unwrap_or(&empty_transition_funcs);
+
+                for c in char::variants() {
+                    for transition_func in transition_funcs {
+                        let tfr = match (*transition_func.transition_func)(Some(c)) {
+                            TransitionFuncReturn::NoMatch => None,
+                            TransitionFuncReturn::Consuming(next)
+                            | TransitionFuncReturn::Epsilon(next) => Some(next),
+                        };
+
+                        transition_table.update_result(state.id, &c, tfr);
+                    }
+                }
+            }
+
+            transition_table
+        };
+
+        let unfa = UnicodeNfa {
+            states,
+            transition_table,
+        };
+
+        Ok(unfa)
+    }
+}
+
 #[cfg(test)]
 mod tests {
+
     use super::*;
 
     #[test]
@@ -576,8 +730,8 @@ mod tests {
 
     #[test]
     fn should_generate_translation_table_for_alphabet() {
-        use super::nfa::Alphabet;
-        use super::TransitionFuncReturn;
+        use super::nfa::{Alphabet, Nfa};
+        use super::UnicodeNfa;
 
         let opcodes = vec![Opcode::Any, Opcode::Any, Opcode::Match];
         let program = Instructions::new(vec![], opcodes);
@@ -587,35 +741,24 @@ mod tests {
 
         // safe to unwrap with above assertion.
         let graph = res.unwrap();
-        let states = graph.nodes();
-        let id_transition_generator_pairing = states
-            .iter()
-            .map(|node| (node.id, graph.mappings.get(node).unwrap()));
+        let unfa = UnicodeNfa::build_nfa(&graph).unwrap();
 
-        let mut transition_table = TransitionTable::<char>::new(states.len());
-
-        for (state_idx, transition_funcs) in id_transition_generator_pairing {
-            for c in char::variants() {
-                for transition_func in transition_funcs {
-                    let tfr = (*transition_func.transition_func)(Some(c));
-                    transition_table.update_result(state_idx, &c, tfr);
-                }
-            }
-        }
+        let initial_state = unfa.states[0];
+        let second_state = unfa.states[1];
 
         // Check all non-epsilon variants
-        for col in transition_table.non_epsilon_columns() {
-            let transition_from_state_0_to_1 = col[0];
+        for letter in char::variants() {
+            let transition_from_state_0_to_1 = unfa.transition(initial_state, Some(&letter));
             assert_eq!(
-                TransitionFuncReturn::Consuming(1),
+                TransitionResult::Match(vec![second_state]),
                 transition_from_state_0_to_1
             );
         }
 
         // Check Epsilon case
         assert_eq!(
-            TransitionFuncReturn::NoMatch,
-            transition_table.epsilon_column()[0]
+            TransitionResult::NoMatch,
+            unfa.transition(initial_state, None),
         );
     }
 }

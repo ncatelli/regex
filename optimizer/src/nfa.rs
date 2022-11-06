@@ -96,8 +96,7 @@ where
     NoMatch,
 }
 
-#[allow(clippy::upper_case_acronyms)]
-pub(crate) trait Nfa<'a, STATE, TF, ALPHABET>
+pub(crate) trait Nfa<'a, STATE, ALPHABET>
 where
     STATE: Hash + Eq,
     ALPHABET: Alphabet,

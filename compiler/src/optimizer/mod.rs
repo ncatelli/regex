@@ -39,7 +39,8 @@ enum EpsilonAction {
     SetExpressionId(u32),
 }
 
-enum TransitionFuncReturn {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TransitionFuncReturn {
     NoMatch,
     Consuming(usize),
     Epsilon(usize),
@@ -47,12 +48,13 @@ enum TransitionFuncReturn {
 
 type BoxedTransitionFunc = Box<dyn Fn(Option<char>) -> TransitionFuncReturn>;
 
-struct RelativeEdge {
+/// Generates a transition via an associated function from a block relative offset.
+struct RelativeEdgeTransitionFunc {
     action: Option<EpsilonAction>,
     transition_func: BoxedTransitionFunc,
 }
 
-impl RelativeEdge {
+impl RelativeEdgeTransitionFunc {
     fn new(func: impl Fn(Option<char>) -> TransitionFuncReturn + 'static) -> Self {
         Self {
             action: None,
@@ -70,7 +72,8 @@ impl RelativeEdge {
         }
     }
 
-    fn into_offset_edge(self, offset: usize) -> OffsetEdge {
+    /// Converts relative edges to a fixed offset.
+    fn into_fixed_offset_edge(self, offset: usize) -> EdgeTransitionFunc {
         let action = self.action;
 
         let transition_func = move |next| {
@@ -85,7 +88,7 @@ impl RelativeEdge {
             }
         };
 
-        OffsetEdge {
+        EdgeTransitionFunc {
             offset,
             action,
             transition_func: Box::new(transition_func),
@@ -93,13 +96,14 @@ impl RelativeEdge {
     }
 }
 
-struct OffsetEdge {
+/// Generates a transition via an associated function.
+struct EdgeTransitionFunc {
     offset: usize,
     action: Option<EpsilonAction>,
     transition_func: BoxedTransitionFunc,
 }
 
-impl OffsetEdge {
+impl EdgeTransitionFunc {
     fn is_epsilon(&self) -> bool {
         self.action.is_some()
     }
@@ -110,7 +114,7 @@ struct Block {
     span: Range<usize>,
     initial: bool,
     states: Vec<State>,
-    edges: Vec<Vec<RelativeEdge>>,
+    edges: Vec<Vec<RelativeEdgeTransitionFunc>>,
 }
 
 impl Block {
@@ -118,7 +122,7 @@ impl Block {
         span: Range<usize>,
         initial: bool,
         states: Vec<State>,
-        edges: Vec<Vec<RelativeEdge>>,
+        edges: Vec<Vec<RelativeEdgeTransitionFunc>>,
     ) -> Self {
         Self {
             span,
@@ -226,7 +230,7 @@ fn blocks_from_program(program: &Instructions) -> Result<Vec<Block>, String> {
                     block.states.push(next_state);
                     block.edges.push(vec![]);
 
-                    let edge = RelativeEdge::new(move |next| {
+                    let edge = RelativeEdgeTransitionFunc::new(move |next| {
                         next.map(|_| TransitionFuncReturn::Consuming(default_dest_state_id))
                             .unwrap_or(TransitionFuncReturn::NoMatch)
                     });
@@ -239,7 +243,7 @@ fn blocks_from_program(program: &Instructions) -> Result<Vec<Block>, String> {
                     block.states.push(next_state);
                     block.edges.push(vec![]);
 
-                    let edge = RelativeEdge::new(move |next| {
+                    let edge = RelativeEdgeTransitionFunc::new(move |next| {
                         if next == Some(value) {
                             TransitionFuncReturn::Consuming(default_dest_state_id)
                         } else {
@@ -270,26 +274,30 @@ fn blocks_from_program(program: &Instructions) -> Result<Vec<Block>, String> {
                     };
 
                     let edge = match set.membership {
-                        SetMembership::Inclusive => RelativeEdge::new(move |next| match next {
-                            Some(value) => {
-                                if char_set.contains(&value) {
-                                    TransitionFuncReturn::Consuming(default_dest_state_id)
-                                } else {
-                                    TransitionFuncReturn::NoMatch
+                        SetMembership::Inclusive => {
+                            RelativeEdgeTransitionFunc::new(move |next| match next {
+                                Some(value) => {
+                                    if char_set.contains(&value) {
+                                        TransitionFuncReturn::Consuming(default_dest_state_id)
+                                    } else {
+                                        TransitionFuncReturn::NoMatch
+                                    }
                                 }
-                            }
-                            None => TransitionFuncReturn::NoMatch,
-                        }),
-                        SetMembership::Exclusive => RelativeEdge::new(move |next| match next {
-                            Some(value) => {
-                                if !char_set.contains(&value) {
-                                    TransitionFuncReturn::Consuming(default_dest_state_id)
-                                } else {
-                                    TransitionFuncReturn::NoMatch
+                                None => TransitionFuncReturn::NoMatch,
+                            })
+                        }
+                        SetMembership::Exclusive => {
+                            RelativeEdgeTransitionFunc::new(move |next| match next {
+                                Some(value) => {
+                                    if !char_set.contains(&value) {
+                                        TransitionFuncReturn::Consuming(default_dest_state_id)
+                                    } else {
+                                        TransitionFuncReturn::NoMatch
+                                    }
                                 }
-                            }
-                            None => TransitionFuncReturn::NoMatch,
-                        }),
+                                None => TransitionFuncReturn::NoMatch,
+                            })
+                        }
                     };
 
                     block.edges[src_state].push(edge);
@@ -319,12 +327,14 @@ fn blocks_from_program(program: &Instructions) -> Result<Vec<Block>, String> {
                         )
                     })?;
 
-                    let x_edge = RelativeEdge::new_with_action(EpsilonAction::None, move |_| {
-                        TransitionFuncReturn::Epsilon(x_branch_block_id)
-                    });
-                    let y_edge = RelativeEdge::new_with_action(EpsilonAction::None, move |_| {
-                        TransitionFuncReturn::Epsilon(y_branch_block_id)
-                    });
+                    let x_edge = RelativeEdgeTransitionFunc::new_with_action(
+                        EpsilonAction::None,
+                        move |_| TransitionFuncReturn::Epsilon(x_branch_block_id),
+                    );
+                    let y_edge = RelativeEdgeTransitionFunc::new_with_action(
+                        EpsilonAction::None,
+                        move |_| TransitionFuncReturn::Epsilon(y_branch_block_id),
+                    );
 
                     block.states.push(next_state);
                     block.edges.push(vec![]);
@@ -339,9 +349,10 @@ fn blocks_from_program(program: &Instructions) -> Result<Vec<Block>, String> {
                             format!("no matching span found for instruction {}", next)
                         })?;
 
-                    let edge = RelativeEdge::new_with_action(EpsilonAction::None, move |_| {
-                        TransitionFuncReturn::Epsilon(next_block_id)
-                    });
+                    let edge = RelativeEdgeTransitionFunc::new_with_action(
+                        EpsilonAction::None,
+                        move |_| TransitionFuncReturn::Epsilon(next_block_id),
+                    );
 
                     block.edges[src_state].push(edge);
                 }
@@ -352,7 +363,7 @@ fn blocks_from_program(program: &Instructions) -> Result<Vec<Block>, String> {
                     block.states.push(next_state);
                     block.edges.push(vec![]);
 
-                    let edge = RelativeEdge::new_with_action(
+                    let edge = RelativeEdgeTransitionFunc::new_with_action(
                         EpsilonAction::StartSave(slot_id),
                         move |_| TransitionFuncReturn::Epsilon(default_dest_state_id),
                     );
@@ -365,10 +376,10 @@ fn blocks_from_program(program: &Instructions) -> Result<Vec<Block>, String> {
                     block.states.push(next_state);
                     block.edges.push(vec![]);
 
-                    let edge =
-                        RelativeEdge::new_with_action(EpsilonAction::EndSave(slot_id), move |_| {
-                            TransitionFuncReturn::Epsilon(default_dest_state_id)
-                        });
+                    let edge = RelativeEdgeTransitionFunc::new_with_action(
+                        EpsilonAction::EndSave(slot_id),
+                        move |_| TransitionFuncReturn::Epsilon(default_dest_state_id),
+                    );
 
                     block.edges[src_state].push(edge);
                 }
@@ -378,7 +389,7 @@ fn blocks_from_program(program: &Instructions) -> Result<Vec<Block>, String> {
                     block.states.push(next_state);
                     block.edges.push(vec![]);
 
-                    let edge = RelativeEdge::new_with_action(
+                    let edge = RelativeEdgeTransitionFunc::new_with_action(
                         EpsilonAction::SetExpressionId(id),
                         move |_| TransitionFuncReturn::Epsilon(default_dest_state_id),
                     );
@@ -388,16 +399,21 @@ fn blocks_from_program(program: &Instructions) -> Result<Vec<Block>, String> {
                 Opcode::Match => {
                     let next_state = State::new(default_dest_state_id, AcceptState::Acceptor);
 
+                    // once in the match state it should never leave.
+                    let trapping_edge = RelativeEdgeTransitionFunc::new_with_action(
+                        EpsilonAction::None,
+                        move |_| TransitionFuncReturn::Epsilon(default_dest_state_id),
+                    );
+
                     block.states.push(next_state);
-                    block.edges.push(vec![]);
+                    block.edges.push(vec![trapping_edge]);
 
-                    let edge = RelativeEdge::new_with_action(EpsilonAction::None, move |_| {
-                        // This was the previous handling of the cond.
-                        // Edge::EpsilonWithCondition(cond)
-                        TransitionFuncReturn::Epsilon(default_dest_state_id)
-                    });
+                    let transition_to_state_edge = RelativeEdgeTransitionFunc::new_with_action(
+                        EpsilonAction::None,
+                        move |_| TransitionFuncReturn::Epsilon(default_dest_state_id),
+                    );
 
-                    block.edges[src_state].push(edge);
+                    block.edges[src_state].push(transition_to_state_edge);
                 }
             }
         }
@@ -409,16 +425,61 @@ fn blocks_from_program(program: &Instructions) -> Result<Vec<Block>, String> {
 }
 
 struct DirectedGraphWithTransitionFuncs {
-    mappings: HashMap<State, Vec<OffsetEdge>>,
+    mappings: HashMap<State, Vec<EdgeTransitionFunc>>,
 }
 
 impl DirectedGraphWithTransitionFuncs {
-    fn new(mappings: HashMap<State, Vec<OffsetEdge>>) -> Self {
+    fn new(mappings: HashMap<State, Vec<EdgeTransitionFunc>>) -> Self {
         Self { mappings }
     }
 
     fn nodes(&self) -> Vec<&State> {
         self.mappings.keys().collect()
+    }
+}
+
+struct TransitionTable<ALPHABET: Alphabet> {
+    alphabet: std::marker::PhantomData<ALPHABET>,
+    mappings: Vec<Vec<TransitionFuncReturn>>,
+    char_to_index_mapping: HashMap<ALPHABET::T, usize>,
+}
+
+impl TransitionTable<char> {
+    const EPSILON_COLUMN: usize = char::VARIANT_CNT;
+
+    fn new(states: usize) -> Self {
+        let variant_count = char::VARIANT_CNT + 1;
+
+        let mappings = vec![vec![TransitionFuncReturn::NoMatch; states]; variant_count];
+        let char_to_index_mapping = char::variants()
+            .enumerate()
+            .map(|(idx, variant)| (variant, idx))
+            .collect();
+
+        Self {
+            alphabet: std::marker::PhantomData,
+            mappings,
+            char_to_index_mapping,
+        }
+    }
+
+    fn epsilon_column(&self) -> &[TransitionFuncReturn] {
+        &self.mappings[Self::EPSILON_COLUMN]
+    }
+
+    fn non_epsilon_columns(&self) -> &[Vec<TransitionFuncReturn>] {
+        &self.mappings[0..Self::EPSILON_COLUMN]
+    }
+
+    fn update_result(&mut self, state_id: usize, variant: &char, new_val: TransitionFuncReturn) {
+        let variant_idx = self.char_to_index_mapping.get(variant).unwrap();
+        self.mappings[*variant_idx][state_id] = new_val;
+    }
+}
+
+impl<ALPHABET: Alphabet> AsRef<[Vec<TransitionFuncReturn>]> for TransitionTable<ALPHABET> {
+    fn as_ref(&self) -> &[Vec<TransitionFuncReturn>] {
+        &self.mappings
     }
 }
 
@@ -447,7 +508,7 @@ fn graph_from_runtime_instruction_set(
 
             let local_edges = local_state_edges
                 .into_iter()
-                .map(|edge| edge.into_offset_edge(block_offset))
+                .map(|edge| edge.into_fixed_offset_edge(block_offset))
                 .collect::<Vec<_>>();
 
             edges.push(local_edges)
@@ -507,5 +568,50 @@ mod tests {
         let spans = block_spans_from_instructions(&program);
 
         assert_eq!(vec![0..1, 1..2, 2..4, 4..7, 7..8], spans);
+    }
+
+    #[test]
+    fn should_generate_translation_table_for_alphabet() {
+        use super::nfa::Alphabet;
+        use super::TransitionFuncReturn;
+
+        let opcodes = vec![Opcode::Any, Opcode::Any, Opcode::Match];
+        let program = Instructions::new(vec![], opcodes);
+        let res = graph_from_runtime_instruction_set(&program);
+
+        assert!(res.is_ok());
+
+        // safe to unwrap with above assertion.
+        let graph = res.unwrap();
+        let states = graph.nodes();
+        let id_transition_generator_pairing = states
+            .iter()
+            .map(|node| (node.id, graph.mappings.get(node).unwrap()));
+
+        let mut transition_table = TransitionTable::<char>::new(states.len());
+
+        for (state_idx, transition_funcs) in id_transition_generator_pairing {
+            for c in char::variants() {
+                for transition_func in transition_funcs {
+                    let tfr = (*transition_func.transition_func)(Some(c));
+                    transition_table.update_result(state_idx, &c, tfr);
+                }
+            }
+        }
+
+        // Check all non-epsilon variants
+        for col in transition_table.non_epsilon_columns() {
+            let transition_from_state_0_to_1 = col[0];
+            assert_eq!(
+                TransitionFuncReturn::Consuming(1),
+                transition_from_state_0_to_1
+            );
+        }
+
+        // Check Epsilon case
+        assert_eq!(
+            TransitionFuncReturn::NoMatch,
+            transition_table.epsilon_column()[0]
+        );
     }
 }

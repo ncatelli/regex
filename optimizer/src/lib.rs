@@ -1,3 +1,7 @@
+#![warn(clippy::cast_lossless)]
+#![warn(clippy::cast_possible_truncation)]
+#![warn(clippy::cast_possible_wrap)]
+
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::ops::Range;

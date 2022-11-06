@@ -50,7 +50,6 @@ pub mod ast;
 pub mod bytecode;
 pub mod compiler;
 pub mod opcode;
-pub mod optimizer;
 pub mod parser;
 
 pub use bytecode::to_binary;

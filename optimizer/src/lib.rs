@@ -575,7 +575,7 @@ pub trait NfaConstructable {
 }
 
 pub struct UnicodeNfa<'a> {
-    states: Vec<&'a State>,
+    states: HashSet<&'a State>,
     transition_table: TransitionTable<char>,
 }
 
@@ -585,18 +585,34 @@ impl<'a> Nfa<'a, State, char> for UnicodeNfa<'a> {
     }
 
     fn states(&self) -> HashSet<&State> {
-        self.states.iter().copied().collect()
+        self.states.clone()
     }
 
     fn initial_state(&self) -> Option<&'a State> {
-        self.states.iter().copied().find(|state| state.id == 0)
+        if let Some(s) = self
+            .states
+            .get(&State {
+                id: 0,
+                kind: AcceptState::NonAcceptor,
+            })
+            .copied()
+        {
+            Some(s)
+        } else {
+            self.states
+                .get(&State {
+                    id: 0,
+                    kind: AcceptState::Acceptor,
+                })
+                .copied()
+        }
     }
 
     fn final_states(&self) -> HashSet<&'a State> {
         self.states
             .iter()
-            .copied()
             .filter(|state| state.kind == AcceptState::Acceptor)
+            .copied()
             .collect()
     }
 
@@ -644,7 +660,7 @@ impl<'a> NfaConstructable for UnicodeNfa<'a> {
     fn build_nfa(input: Self::Input) -> Result<Self::Output, Self::Error> {
         let graph = input;
 
-        let states = graph.nodes();
+        let states: HashSet<_> = graph.nodes().into_iter().collect();
 
         let transition_table = {
             let mut transition_table = TransitionTable::<char>::new(states.len());
@@ -743,8 +759,18 @@ mod tests {
         let graph = res.unwrap();
         let unfa = UnicodeNfa::build_nfa(&graph).unwrap();
 
-        let initial_state = unfa.states[0];
-        let second_state = unfa.states[1];
+        let initial_state = unfa
+            .states
+            .iter()
+            .find(|state| state.id == 0)
+            .copied()
+            .unwrap();
+        let second_state = unfa
+            .states
+            .iter()
+            .find(|state| state.id == 1)
+            .copied()
+            .unwrap();
 
         // Check all non-epsilon variants
         for letter in char::variants() {

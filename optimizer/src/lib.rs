@@ -575,7 +575,7 @@ pub trait NfaConstructable {
 }
 
 pub struct UnicodeNfa<'a> {
-    states: HashSet<&'a State>,
+    states: HashMap<usize, &'a State>,
     transition_table: TransitionTable<char>,
 }
 
@@ -585,32 +585,18 @@ impl<'a> Nfa<'a, State, char> for UnicodeNfa<'a> {
     }
 
     fn states(&self) -> HashSet<&State> {
-        self.states.clone()
+        self.states.values().copied().collect()
     }
 
     fn initial_state(&self) -> Option<&'a State> {
-        if let Some(s) = self
-            .states
-            .get(&State {
-                id: 0,
-                kind: AcceptState::NonAcceptor,
-            })
-            .copied()
-        {
-            Some(s)
-        } else {
-            self.states
-                .get(&State {
-                    id: 0,
-                    kind: AcceptState::Acceptor,
-                })
-                .copied()
-        }
+        let initial_id = 0;
+
+        self.states.get(&initial_id).copied()
     }
 
     fn final_states(&self) -> HashSet<&'a State> {
         self.states
-            .iter()
+            .values()
             .filter(|state| state.kind == AcceptState::Acceptor)
             .copied()
             .collect()
@@ -630,7 +616,7 @@ impl<'a> Nfa<'a, State, char> for UnicodeNfa<'a> {
                 match tfr {
                     None => TransitionResult::NoMatch,
                     Some(next) => {
-                        let state = self.states.iter().find(|state| state.id == next).unwrap();
+                        let state = self.states.get(&next).unwrap();
                         TransitionResult::Epsilon(vec![state])
                     }
                 }
@@ -643,7 +629,7 @@ impl<'a> Nfa<'a, State, char> for UnicodeNfa<'a> {
                 match tfr {
                     None => TransitionResult::NoMatch,
                     Some(next) => {
-                        let state = self.states.iter().find(|state| state.id == next).unwrap();
+                        let state = self.states.get(&next).unwrap();
                         TransitionResult::Match(vec![state])
                     }
                 }
@@ -659,15 +645,18 @@ impl<'a> NfaConstructable for UnicodeNfa<'a> {
 
     fn build_nfa(input: Self::Input) -> Result<Self::Output, Self::Error> {
         let graph = input;
-
-        let states: HashSet<_> = graph.nodes().into_iter().collect();
+        let states: HashMap<usize, _> = graph
+            .nodes()
+            .into_iter()
+            .map(|state| (state.id, state))
+            .collect();
 
         let transition_table = {
             let mut transition_table = TransitionTable::<char>::new(states.len());
 
             // safe to unwrap with above assertion.
             let empty_transition_funcs = vec![];
-            for state in states.iter() {
+            for state in states.values() {
                 let transition_funcs = graph
                     .edges_by_id(state.id)
                     .unwrap_or(&empty_transition_funcs);
@@ -759,14 +748,12 @@ mod tests {
         let graph = res.unwrap();
         let unfa = UnicodeNfa::build_nfa(&graph).unwrap();
 
-        let initial_state = unfa
-            .states
-            .iter()
-            .find(|state| state.id == 0)
-            .copied()
-            .unwrap();
+        // assert 4 nodes in nfa.
+        assert_eq!(4, unfa.states().len());
+
+        let initial_state = unfa.initial_state().unwrap();
         let second_state = unfa
-            .states
+            .states()
             .iter()
             .find(|state| state.id == 1)
             .copied()

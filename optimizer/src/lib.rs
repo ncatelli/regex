@@ -93,7 +93,6 @@ impl RelativeEdgeTransitionFunc {
         };
 
         EdgeTransitionFunc {
-            offset,
             action,
             transition_func: Box::new(transition_func),
         }
@@ -102,7 +101,6 @@ impl RelativeEdgeTransitionFunc {
 
 /// Generates a transition via an associated function.
 struct EdgeTransitionFunc {
-    offset: usize,
     action: Option<EpsilonAction>,
     transition_func: BoxedTransitionFunc,
 }
@@ -478,10 +476,34 @@ impl DirectedGraphWithTransitionFuncs {
     }
 }
 
+/// Represents a table mapping destination to either zero or more destination nodes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum MappingDestination {
+    None,
+    Single(usize),
+    Multiple(Vec<usize>),
+}
+
+impl MappingDestination {
+    fn ok(self) -> Option<Vec<usize>> {
+        match self {
+            MappingDestination::None => None,
+            MappingDestination::Single(dest) => Some(vec![dest]),
+            MappingDestination::Multiple(dests) => Some(dests),
+        }
+    }
+}
+
+impl Default for MappingDestination {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
 struct TransitionTable<ALPHABET: Alphabet> {
     alphabet: std::marker::PhantomData<ALPHABET>,
-    mappings: Vec<Vec<Option<usize>>>,
-    char_to_index_mapping: HashMap<ALPHABET::T, usize>,
+    non_epsilon_mappings: Vec<HashMap<ALPHABET::T, MappingDestination>>,
+    epsilon_mappings: Vec<MappingDestination>,
 }
 
 impl TransitionTable<char> {
@@ -490,36 +512,63 @@ impl TransitionTable<char> {
     fn new(states: usize) -> Self {
         let variant_count = char::VARIANT_CNT + 1;
 
-        let mappings = vec![vec![None; states]; variant_count];
-        let char_to_index_mapping = char::variants()
-            .enumerate()
-            .map(|(idx, variant)| (variant, idx))
-            .collect();
+        let non_epsilon_mappings = vec![HashMap::default(); states];
+        let epsilon_mappings = vec![MappingDestination::None; states];
 
         Self {
             alphabet: std::marker::PhantomData,
-            mappings,
-            char_to_index_mapping,
+            non_epsilon_mappings,
+            epsilon_mappings,
         }
     }
 
-    fn epsilon_column(&self) -> &[Option<usize>] {
-        &self.mappings[Self::EPSILON_COLUMN]
+    fn epsilon_column(&self, state_id: usize) -> Option<&MappingDestination> {
+        self.epsilon_mappings.get(state_id)
     }
 
-    fn non_epsilon_columns(&self) -> &[Vec<Option<usize>>] {
-        &self.mappings[0..Self::EPSILON_COLUMN]
+    fn non_epsilon_column(&self, state_id: usize) -> Option<&HashMap<char, MappingDestination>> {
+        self.non_epsilon_mappings.get(state_id)
     }
 
-    fn update_result(&mut self, state_id: usize, variant: &char, new_val: Option<usize>) {
-        let variant_idx = self.char_to_index_mapping.get(variant).unwrap();
-        self.mappings[*variant_idx][state_id] = new_val;
-    }
-}
+    fn append_destination(
+        &mut self,
+        state_id: usize,
+        variant: Option<&char>,
+        new_val: MappingDestination,
+    ) {
+        let current_value = match variant {
+            Some(c) => self.non_epsilon_mappings[state_id]
+                .remove(c)
+                .unwrap_or(MappingDestination::None),
+            None => std::mem::take(&mut self.epsilon_mappings[state_id]),
+        };
 
-impl<ALPHABET: Alphabet> AsRef<[Vec<Option<usize>>]> for TransitionTable<ALPHABET> {
-    fn as_ref(&self) -> &[Vec<Option<usize>>] {
-        &self.mappings
+        let appended_val = match (current_value, new_val) {
+            (MappingDestination::None, MappingDestination::None) => MappingDestination::None,
+            (MappingDestination::None, new) => new,
+            (old, MappingDestination::None) => old,
+            (MappingDestination::Single(old), MappingDestination::Single(new)) => {
+                MappingDestination::Multiple(vec![old, new])
+            }
+            (MappingDestination::Single(old), MappingDestination::Multiple(new)) => {
+                MappingDestination::Multiple([old].into_iter().chain(new.into_iter()).collect())
+            }
+            (MappingDestination::Multiple(old), MappingDestination::Single(new)) => {
+                MappingDestination::Multiple(old.into_iter().chain([new].into_iter()).collect())
+            }
+            (MappingDestination::Multiple(old), MappingDestination::Multiple(new)) => {
+                MappingDestination::Multiple(old.into_iter().chain(new.into_iter()).collect())
+            }
+        };
+
+        match variant {
+            Some(c) => {
+                self.non_epsilon_mappings[state_id].insert(*c, appended_val);
+            }
+            None => {
+                self.epsilon_mappings[state_id] = appended_val;
+            }
+        };
     }
 }
 
@@ -607,30 +656,48 @@ impl<'a> Nfa<'a, State, char> for UnicodeNfa<'a> {
         current_state: &'a State,
         next_input: Option<&char>,
     ) -> TransitionResult<'a, State> {
-        let row_idx = current_state.id;
+        let state_id = current_state.id;
 
         match next_input {
             None => {
-                let tfr = self.transition_table.epsilon_column()[row_idx];
+                let tfr = &self.transition_table.epsilon_column(state_id);
 
                 match tfr {
-                    None => TransitionResult::NoMatch,
-                    Some(next) => {
+                    None | Some(MappingDestination::None) => TransitionResult::NoMatch,
+                    Some(MappingDestination::Single(next)) => {
                         let state = self.states.get(&next).unwrap();
                         TransitionResult::Epsilon(vec![state])
+                    }
+                    Some(MappingDestination::Multiple(next)) => {
+                        let states = next
+                            .iter()
+                            .map(|dest| self.states.get(dest).unwrap())
+                            .copied()
+                            .collect();
+                        TransitionResult::Epsilon(states)
                     }
                 }
             }
             Some(c) => {
                 // safe to guarantee this can be unwrapped for char.
-                let column_idx = self.transition_table.char_to_index_mapping.get(c).unwrap();
-                let tfr = self.transition_table.non_epsilon_columns()[*column_idx][row_idx];
+                let tfr = &self
+                    .transition_table
+                    .non_epsilon_column(state_id)
+                    .and_then(|row| row.get(c));
 
                 match tfr {
-                    None => TransitionResult::NoMatch,
-                    Some(next) => {
-                        let state = self.states.get(&next).unwrap();
+                    None | Some(MappingDestination::None) => TransitionResult::NoMatch,
+                    Some(MappingDestination::Single(next)) => {
+                        let state = self.states.get(next).unwrap();
                         TransitionResult::Match(vec![state])
+                    }
+                    Some(MappingDestination::Multiple(next)) => {
+                        let states = next
+                            .iter()
+                            .map(|dest| self.states.get(dest).unwrap())
+                            .copied()
+                            .collect();
+                        TransitionResult::Match(states)
                     }
                 }
             }
@@ -661,15 +728,22 @@ impl<'a> NfaConstructable for UnicodeNfa<'a> {
                     .edges_by_id(state.id)
                     .unwrap_or(&empty_transition_funcs);
 
-                for c in char::variants() {
+                // generate all mappings
+                let char_variants = char::variants().map(|c| Some(c));
+                let char_variants_and_epsilon = char_variants.chain([None].into_iter());
+                for c in char_variants_and_epsilon {
                     for transition_func in transition_funcs {
-                        let tfr = match (*transition_func.transition_func)(Some(c)) {
-                            TransitionFuncReturn::NoMatch => None,
+                        match (*transition_func.transition_func)(c) {
                             TransitionFuncReturn::Consuming(next)
-                            | TransitionFuncReturn::Epsilon(next) => Some(next),
+                            | TransitionFuncReturn::Epsilon(next) => {
+                                transition_table.append_destination(
+                                    state.id,
+                                    c.as_ref(),
+                                    MappingDestination::Single(next),
+                                );
+                            }
+                            _ => (),
                         };
-
-                        transition_table.update_result(state.id, &c, tfr);
                     }
                 }
             }
@@ -688,7 +762,6 @@ impl<'a> NfaConstructable for UnicodeNfa<'a> {
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
 
     #[test]
@@ -734,7 +807,7 @@ mod tests {
     }
 
     #[test]
-    fn should_generate_translation_table_for_alphabet() {
+    fn should_generate_valid_nfa_from_single_block_program() {
         use super::nfa::{Alphabet, Nfa};
         use super::UnicodeNfa;
 
@@ -750,6 +823,57 @@ mod tests {
 
         // assert 4 nodes in nfa.
         assert_eq!(4, unfa.states().len());
+
+        let initial_state = unfa.initial_state().unwrap();
+        let second_state = unfa
+            .states()
+            .iter()
+            .find(|state| state.id == 1)
+            .copied()
+            .unwrap();
+
+        // Check all non-epsilon variants
+        for letter in char::variants() {
+            let transition_from_state_0_to_1 = unfa.transition(initial_state, Some(&letter));
+            assert_eq!(
+                TransitionResult::Match(vec![second_state]),
+                transition_from_state_0_to_1
+            );
+        }
+
+        // Check Epsilon case
+        assert_eq!(
+            TransitionResult::NoMatch,
+            unfa.transition(initial_state, None),
+        );
+    }
+
+    #[ignore = "unimplemented"]
+    #[test]
+    fn should_generate_valid_nfa_from_multi_block_program() {
+        use super::nfa::{Alphabet, Nfa};
+        use super::UnicodeNfa;
+
+        let opcodes = vec![
+            Opcode::Split(InstSplit::new(InstIndex::from(1), InstIndex::from(4))),
+            Opcode::Consume(InstConsume::new('a')),
+            Opcode::Any,
+            Opcode::Match,
+            Opcode::Consume(InstConsume::new('b')),
+            Opcode::Any,
+            Opcode::Match,
+        ];
+        let program = Instructions::new(vec![], opcodes);
+        let res = graph_from_runtime_instruction_set(&program);
+
+        assert!(res.is_ok());
+
+        // safe to unwrap with above assertion.
+        let graph = res.unwrap();
+        let unfa = UnicodeNfa::build_nfa(&graph).unwrap();
+
+        // assert correct number of states.
+        assert_eq!(10, unfa.states().len());
 
         let initial_state = unfa.initial_state().unwrap();
         let second_state = unfa

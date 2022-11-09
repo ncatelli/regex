@@ -477,7 +477,7 @@ impl DirectedGraphWithTransitionFuncs {
 }
 
 /// Represents a table mapping destination to either zero or more destination nodes.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Hash, Clone, PartialEq, Eq)]
 enum MappingDestination {
     None,
     Single(usize),
@@ -500,19 +500,68 @@ impl Default for MappingDestination {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TableRow<ALPHABET: Alphabet> {
+    default_state: MappingDestination,
+    columns: HashMap<ALPHABET::T, MappingDestination>,
+}
+
+impl<ALPHABET: Alphabet> TableRow<ALPHABET> {
+    fn new(
+        default_state: MappingDestination,
+        columns: HashMap<ALPHABET::T, MappingDestination>,
+    ) -> Self {
+        Self {
+            default_state,
+            columns,
+        }
+    }
+
+    fn get(&self, key: &ALPHABET::T) -> &MappingDestination {
+        self.columns.get(key).unwrap_or(&self.default_state)
+    }
+
+    /// Finds the most common `MappingDestination` value, setting it as the
+    /// default and purging the entries from the column table.
+    fn refine(&mut self) {
+        let mut freq = HashMap::<&MappingDestination, usize>::new();
+
+        for dest in self.columns.values() {
+            freq.entry(dest)
+                .and_modify(|counter| *counter += 1)
+                .or_insert(1);
+        }
+
+        let most_frequent = freq.iter().max_by_key(|(_, &occurrences)| occurrences);
+
+        if let Some((&dest, _)) = most_frequent {
+            let new_default = dest.clone();
+
+            self.columns.retain(|_, v| v != &new_default);
+            self.columns.shrink_to_fit();
+            self.default_state = new_default;
+        }
+    }
+}
+
+impl<ALPHABET: Alphabet> Default for TableRow<ALPHABET> {
+    fn default() -> Self {
+        Self {
+            default_state: MappingDestination::None,
+            columns: Default::default(),
+        }
+    }
+}
+
 struct TransitionTable<ALPHABET: Alphabet> {
     alphabet: std::marker::PhantomData<ALPHABET>,
-    non_epsilon_mappings: Vec<HashMap<ALPHABET::T, MappingDestination>>,
+    non_epsilon_mappings: Vec<TableRow<ALPHABET>>,
     epsilon_mappings: Vec<MappingDestination>,
 }
 
 impl TransitionTable<char> {
-    const EPSILON_COLUMN: usize = char::VARIANT_CNT;
-
     fn new(states: usize) -> Self {
-        let variant_count = char::VARIANT_CNT + 1;
-
-        let non_epsilon_mappings = vec![HashMap::default(); states];
+        let non_epsilon_mappings = vec![TableRow::default(); states];
         let epsilon_mappings = vec![MappingDestination::None; states];
 
         Self {
@@ -526,7 +575,7 @@ impl TransitionTable<char> {
         self.epsilon_mappings.get(state_id)
     }
 
-    fn non_epsilon_column(&self, state_id: usize) -> Option<&HashMap<char, MappingDestination>> {
+    fn non_epsilon_column(&self, state_id: usize) -> Option<&TableRow<char>> {
         self.non_epsilon_mappings.get(state_id)
     }
 
@@ -538,6 +587,7 @@ impl TransitionTable<char> {
     ) {
         let current_value = match variant {
             Some(c) => self.non_epsilon_mappings[state_id]
+                .columns
                 .remove(c)
                 .unwrap_or(MappingDestination::None),
             None => std::mem::take(&mut self.epsilon_mappings[state_id]),
@@ -563,7 +613,9 @@ impl TransitionTable<char> {
 
         match variant {
             Some(c) => {
-                self.non_epsilon_mappings[state_id].insert(*c, appended_val);
+                self.non_epsilon_mappings[state_id]
+                    .columns
+                    .insert(*c, appended_val);
             }
             None => {
                 self.epsilon_mappings[state_id] = appended_val;
@@ -665,7 +717,7 @@ impl<'a> Nfa<'a, State, char> for UnicodeNfa<'a> {
                 match tfr {
                     None | Some(MappingDestination::None) => TransitionResult::NoMatch,
                     Some(MappingDestination::Single(next)) => {
-                        let state = self.states.get(&next).unwrap();
+                        let state = self.states.get(next).unwrap();
                         TransitionResult::Epsilon(vec![state])
                     }
                     Some(MappingDestination::Multiple(next)) => {
@@ -683,7 +735,7 @@ impl<'a> Nfa<'a, State, char> for UnicodeNfa<'a> {
                 let tfr = &self
                     .transition_table
                     .non_epsilon_column(state_id)
-                    .and_then(|row| row.get(c));
+                    .map(|row| row.get(c));
 
                 match tfr {
                     None | Some(MappingDestination::None) => TransitionResult::NoMatch,
@@ -729,7 +781,7 @@ impl<'a> NfaConstructable for UnicodeNfa<'a> {
                     .unwrap_or(&empty_transition_funcs);
 
                 // generate all mappings
-                let char_variants = char::variants().map(|c| Some(c));
+                let char_variants = char::variants().map(Some);
                 let char_variants_and_epsilon = char_variants.chain([None].into_iter());
                 for c in char_variants_and_epsilon {
                     for transition_func in transition_funcs {
@@ -746,6 +798,9 @@ impl<'a> NfaConstructable for UnicodeNfa<'a> {
                         };
                     }
                 }
+
+                // Reduce the row to the mose frequent default
+                transition_table.non_epsilon_mappings[state.id].refine();
             }
 
             transition_table

@@ -29,12 +29,6 @@ enum AcceptState {
     NonAcceptor,
 }
 
-impl AcceptState {
-    fn is_acceptor(&self) -> bool {
-        self == &AcceptState::Acceptor
-    }
-}
-
 #[derive(Debug, PartialEq, Eq)]
 enum EpsilonAction {
     None,
@@ -101,38 +95,19 @@ impl RelativeEdgeTransitionFunc {
 
 /// Generates a transition via an associated function.
 struct EdgeTransitionFunc {
+    #[allow(unused)]
     action: Option<EpsilonAction>,
     transition_func: BoxedTransitionFunc,
 }
 
-impl EdgeTransitionFunc {
-    fn is_epsilon(&self) -> bool {
-        self.action.is_some()
-    }
-}
-
 #[derive(Default)]
 struct Block {
+    #[allow(unused)]
     span: Range<usize>,
+    #[allow(unused)]
     initial: bool,
     states: Vec<State>,
     edges: Vec<Vec<RelativeEdgeTransitionFunc>>,
-}
-
-impl Block {
-    fn new(
-        span: Range<usize>,
-        initial: bool,
-        states: Vec<State>,
-        edges: Vec<Vec<RelativeEdgeTransitionFunc>>,
-    ) -> Self {
-        Self {
-            span,
-            initial,
-            states,
-            edges,
-        }
-    }
 }
 
 fn block_spans_from_instructions(program: &Instructions) -> Vec<Range<usize>> {
@@ -440,14 +415,6 @@ impl DirectedGraphWithTransitionFuncs {
         self.mappings.keys().collect()
     }
 
-    fn adjacency_table(&self) -> &HashMap<State, Vec<EdgeTransitionFunc>> {
-        &self.mappings
-    }
-
-    fn adjacency_table_mut(&mut self) -> &mut HashMap<State, Vec<EdgeTransitionFunc>> {
-        &mut self.mappings
-    }
-
     fn node_by_id(&self, id: usize) -> Option<&State> {
         let state = self
             .mappings
@@ -484,16 +451,6 @@ enum MappingDestination {
     Multiple(Vec<usize>),
 }
 
-impl MappingDestination {
-    fn ok(self) -> Option<Vec<usize>> {
-        match self {
-            MappingDestination::None => None,
-            MappingDestination::Single(dest) => Some(vec![dest]),
-            MappingDestination::Multiple(dests) => Some(dests),
-        }
-    }
-}
-
 impl Default for MappingDestination {
     fn default() -> Self {
         Self::None
@@ -507,16 +464,6 @@ struct TableRow<ALPHABET: Alphabet> {
 }
 
 impl<ALPHABET: Alphabet> TableRow<ALPHABET> {
-    fn new(
-        default_state: MappingDestination,
-        columns: HashMap<ALPHABET::T, MappingDestination>,
-    ) -> Self {
-        Self {
-            default_state,
-            columns,
-        }
-    }
-
     fn get(&self, key: &ALPHABET::T) -> &MappingDestination {
         self.columns.get(key).unwrap_or(&self.default_state)
     }
@@ -625,6 +572,7 @@ impl TransitionTable<char> {
 }
 
 /// Generates a directed graph from a given program.
+#[allow(unused)]
 fn graph_from_runtime_instruction_set(
     program: &Instructions,
 ) -> Result<DirectedGraphWithTransitionFuncs, String> {

@@ -115,3 +115,7 @@ where
         self.final_states().contains(state)
     }
 }
+
+pub(crate) trait DotGeneratable {
+    fn generate_dot(&self) -> String;
+}

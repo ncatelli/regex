@@ -5,11 +5,12 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::ops::Range;
+use std::process::id;
 
 use regex_runtime::*;
 
 mod nfa;
-use nfa::{Alphabet, Nfa, TransitionResult};
+use nfa::{Alphabet, DotGeneratable, Nfa, TransitionResult};
 
 #[derive(Debug, Hash, PartialEq, Eq)]
 struct State {
@@ -763,6 +764,101 @@ impl<'a> NfaConstructable for UnicodeNfa<'a> {
     }
 }
 
+impl<'a> DotGeneratable for UnicodeNfa<'a> {
+    fn generate_dot(&self) -> String {
+        let graph_preamble = "digraph G {";
+        let graph_postamble = "}";
+
+        let states = self
+            .states()
+            .iter()
+            .map(|state| match state {
+                State {
+                    id,
+                    kind: AcceptState::Acceptor,
+                } => format!("{}[shape=doublecircle];\n", id),
+                State {
+                    id,
+                    kind: AcceptState::NonAcceptor,
+                } => format!("{}[shape=circle];\n", id),
+            })
+            .collect::<String>();
+
+        let epsilon_edges = self
+            .transition_table
+            .epsilon_mappings
+            .iter()
+            .enumerate()
+            .map(|(src, mapping)| match mapping {
+                MappingDestination::None => "".to_string(),
+                MappingDestination::Single(dest) => format!("{} -> {}[label=ε];\n", src, dest),
+                MappingDestination::Multiple(dests) => dests
+                    .iter()
+                    .copied()
+                    .map(|dest| format!("{} -> {}[label=ε];\n", src, dest))
+                    .collect(),
+            })
+            .collect::<String>();
+
+        let non_epsilon_edges = self
+            .transition_table
+            .non_epsilon_mappings
+            .iter()
+            .enumerate()
+            .map(|(src, row)| {
+                let mappings = &row.columns;
+                if mappings.is_empty() {
+                    match &row.default_state {
+                        MappingDestination::None => "".to_string(),
+                        MappingDestination::Single(dest) => {
+                            format!("{} -> {}[label=any];\n", src, dest)
+                        }
+                        MappingDestination::Multiple(dests) => dests
+                            .iter()
+                            .copied()
+                            .map(|dest| format!("{} -> {}[label=any];\n", src, dest))
+                            .collect(),
+                    }
+                } else {
+                    let default = match &row.default_state {
+                        MappingDestination::None => "".to_string(),
+                        MappingDestination::Single(dest) => {
+                            format!("{} -> {}[label=_];\n", src, dest)
+                        }
+                        MappingDestination::Multiple(dests) => dests
+                            .iter()
+                            .copied()
+                            .map(|dest| format!("{} -> {}[label=_];\n", src, dest))
+                            .collect(),
+                    };
+
+                    let mapped_edges = mappings
+                        .iter()
+                        .map(|(k, v)| match v {
+                            MappingDestination::None => "".to_string(),
+                            MappingDestination::Single(dest) => {
+                                format!("{} -> {}[label={}];\n", src, dest, k)
+                            }
+                            MappingDestination::Multiple(dests) => dests
+                                .iter()
+                                .copied()
+                                .map(|dest| format!("{} -> {}[label={}];\n", src, dest, k))
+                                .collect(),
+                        })
+                        .collect();
+
+                    [default, mapped_edges].join("\n")
+                }
+            })
+            .collect::<String>();
+
+        format!(
+            "{}\n{}\n{}\n{}{}",
+            graph_preamble, states, epsilon_edges, non_epsilon_edges, graph_postamble
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -811,7 +907,7 @@ mod tests {
 
     #[test]
     fn should_generate_valid_nfa_from_single_block_program() {
-        use super::nfa::{Alphabet, Nfa};
+        use super::nfa::{Alphabet, DotGeneratable, Nfa};
         use super::UnicodeNfa;
 
         let opcodes = vec![Opcode::Any, Opcode::Any, Opcode::Match];

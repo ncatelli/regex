@@ -658,46 +658,62 @@ impl<'a> Nfa<'a, State, char> for UnicodeNfa<'a> {
     ) -> TransitionResult<'a, State> {
         let state_id = current_state.id;
 
-        match next_input {
-            None => {
-                let tfr = &self.transition_table.epsilon_column(state_id);
+        let epsilon_mapping = &self.transition_table.epsilon_column(state_id);
 
-                match tfr {
-                    None | Some(MappingDestination::None) => TransitionResult::NoMatch,
-                    Some(MappingDestination::Single(next)) => {
-                        let state = self.states.get(next).unwrap();
-                        TransitionResult::Epsilon(vec![state])
-                    }
-                    Some(MappingDestination::Multiple(next)) => {
-                        let states = next
-                            .iter()
-                            .map(|dest| self.states.get(dest).unwrap())
-                            .copied()
-                            .collect();
-                        TransitionResult::Epsilon(states)
-                    }
+        match next_input {
+            None => match epsilon_mapping {
+                None | Some(MappingDestination::None) => TransitionResult::NoMatch,
+                Some(MappingDestination::Single(next)) => {
+                    let state = self.states.get(next).unwrap();
+                    TransitionResult::Epsilon(vec![state])
                 }
-            }
+                Some(MappingDestination::Multiple(next)) => {
+                    let states = next
+                        .iter()
+                        .map(|dest| self.states.get(dest).unwrap())
+                        .copied()
+                        .collect();
+                    TransitionResult::Epsilon(states)
+                }
+            },
             Some(c) => {
                 // safe to guarantee this can be unwrapped for char.
-                let tfr = &self
+                let non_epsilon_mapping = &self
                     .transition_table
                     .non_epsilon_column(state_id)
                     .map(|row| row.get(c));
 
-                match tfr {
-                    None | Some(MappingDestination::None) => TransitionResult::NoMatch,
-                    Some(MappingDestination::Single(next)) => {
-                        let state = self.states.get(next).unwrap();
-                        TransitionResult::Match(vec![state])
+                if epsilon_mapping == non_epsilon_mapping {
+                    match epsilon_mapping {
+                        None | Some(MappingDestination::None) => TransitionResult::NoMatch,
+                        Some(MappingDestination::Single(next)) => {
+                            let state = self.states.get(next).unwrap();
+                            TransitionResult::Epsilon(vec![state])
+                        }
+                        Some(MappingDestination::Multiple(next)) => {
+                            let states = next
+                                .iter()
+                                .map(|dest| self.states.get(dest).unwrap())
+                                .copied()
+                                .collect();
+                            TransitionResult::Epsilon(states)
+                        }
                     }
-                    Some(MappingDestination::Multiple(next)) => {
-                        let states = next
-                            .iter()
-                            .map(|dest| self.states.get(dest).unwrap())
-                            .copied()
-                            .collect();
-                        TransitionResult::Match(states)
+                } else {
+                    match non_epsilon_mapping {
+                        None | Some(MappingDestination::None) => TransitionResult::NoMatch,
+                        Some(MappingDestination::Single(next)) => {
+                            let state = self.states.get(next).unwrap();
+                            TransitionResult::Match(vec![state])
+                        }
+                        Some(MappingDestination::Multiple(next)) => {
+                            let states = next
+                                .iter()
+                                .map(|dest| self.states.get(dest).unwrap())
+                                .copied()
+                                .collect();
+                            TransitionResult::Match(states)
+                        }
                     }
                 }
             }
@@ -788,16 +804,16 @@ impl<'a> DotGeneratable for UnicodeNfa<'a> {
             .epsilon_mappings
             .iter()
             .enumerate()
-            .map(|(src, mapping)| match mapping {
-                MappingDestination::None => "".to_string(),
-                MappingDestination::Single(dest) => format!("{} -> {}[label=ε];\n", src, dest),
+            .flat_map(|(src, mapping)| match mapping {
+                MappingDestination::None => vec![None],
+                MappingDestination::Single(dest) => vec![Some((src, dest))],
                 MappingDestination::Multiple(dests) => dests
                     .iter()
-                    .copied()
-                    .map(|dest| format!("{} -> {}[label=ε];\n", src, dest))
-                    .collect(),
+                    .map(|dest| Some((src, dest)))
+                    .collect::<Vec<_>>(),
             })
-            .collect::<String>();
+            .flatten()
+            .collect::<HashSet<_>>();
 
         let non_epsilon_edges = self
             .transition_table
@@ -807,17 +823,21 @@ impl<'a> DotGeneratable for UnicodeNfa<'a> {
             .map(|(src, row)| {
                 let mappings = &row.columns;
                 if mappings.is_empty() {
+                    // filter out any mappings that do not have an epsilon
+                    // translation.
                     match &row.default_state {
-                        MappingDestination::None => "".to_string(),
-                        MappingDestination::Single(dest) => {
-                            format!("{} -> {}[label=any];\n", src, dest)
-                        }
+                        MappingDestination::None => vec![None],
+                        MappingDestination::Single(dest) => vec![Some((src, dest))],
                         MappingDestination::Multiple(dests) => dests
                             .iter()
-                            .copied()
-                            .map(|dest| format!("{} -> {}[label=any];\n", src, dest))
-                            .collect(),
+                            .map(|dest| Some((src, dest)))
+                            .collect::<Vec<_>>(),
                     }
+                    .into_iter()
+                    .flatten()
+                    .filter(|mapping| !epsilon_edges.contains(mapping))
+                    .map(|(src, dest)| format!("{} -> {}[label=any];\n", src, dest))
+                    .collect::<String>()
                 } else {
                     let default = match &row.default_state {
                         MappingDestination::None => "".to_string(),
@@ -851,9 +871,18 @@ impl<'a> DotGeneratable for UnicodeNfa<'a> {
             })
             .collect::<String>();
 
+        let string_repr_of_epsilon_edges = epsilon_edges
+            .iter()
+            .map(|(src, dest)| format!("{} -> {}[label=ε];\n", src, dest))
+            .collect::<String>();
+
         format!(
             "{}\n{}\n{}\n{}{}",
-            graph_preamble, states, epsilon_edges, non_epsilon_edges, graph_postamble
+            graph_preamble,
+            states,
+            string_repr_of_epsilon_edges,
+            non_epsilon_edges,
+            graph_postamble
         )
     }
 }
@@ -929,21 +958,63 @@ mod tests {
             .find(|state| state.id == 1)
             .copied()
             .unwrap();
+        let third_state = unfa
+            .states()
+            .iter()
+            .find(|state| state.id == 2)
+            .copied()
+            .unwrap();
+        let final_state = unfa
+            .states()
+            .iter()
+            .find(|state| state.id == 3)
+            .copied()
+            .unwrap();
 
-        // Check all non-epsilon variants
-        for letter in char::variants() {
-            let transition_from_state_0_to_1 = unfa.transition(initial_state, Some(&letter));
+        // Check all variants
+        for input in char::variants().map(Some).chain([None].into_iter()) {
+            let transition_from_state_0_to_1 = unfa.transition(initial_state, input.as_ref());
+            // only match on inputs.
+            let expect = input.map_or_else(
+                || TransitionResult::NoMatch,
+                |_| TransitionResult::Match(vec![second_state]),
+            );
             assert_eq!(
-                TransitionResult::Match(vec![second_state]),
-                transition_from_state_0_to_1
+                &expect, &transition_from_state_0_to_1,
+                "got {:?} for input {:?} expected {:?}",
+                &transition_from_state_0_to_1, &input, &expect,
+            );
+
+            let transition_from_state_2_to_3 = unfa.transition(third_state, input.as_ref());
+            let expect = TransitionResult::Epsilon(vec![final_state]);
+            assert_eq!(
+                &expect, &transition_from_state_2_to_3,
+                "got {:?} for input {:?} expected {:?}",
+                &transition_from_state_2_to_3, &input, &expect,
             );
         }
+    }
 
-        // Check Epsilon case
-        assert_eq!(
-            TransitionResult::NoMatch,
-            unfa.transition(initial_state, None),
-        );
+    #[test]
+    fn should_generate_correct_dot_graph() {
+        use super::nfa::{DotGeneratable, Nfa};
+        use super::UnicodeNfa;
+
+        let opcodes = vec![Opcode::Any, Opcode::Any, Opcode::Match];
+        let program = Instructions::new(vec![], opcodes);
+        let res = graph_from_runtime_instruction_set(&program);
+
+        assert!(res.is_ok());
+
+        // safe to unwrap with above assertion.
+        let graph = res.unwrap();
+        let unfa = UnicodeNfa::build_nfa(&graph).unwrap();
+
+        // assert 4 nodes in nfa.
+        assert_eq!(4, unfa.states().len());
+
+        let dot = unfa.generate_dot();
+        println!("{}", dot);
     }
 
     #[ignore = "unimplemented"]

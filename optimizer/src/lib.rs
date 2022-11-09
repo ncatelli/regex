@@ -5,7 +5,6 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::ops::Range;
-use std::process::id;
 
 use regex_runtime::*;
 
@@ -907,7 +906,7 @@ mod tests {
 
     #[test]
     fn should_generate_valid_nfa_from_single_block_program() {
-        use super::nfa::{Alphabet, DotGeneratable, Nfa};
+        use super::nfa::{Alphabet, Nfa};
         use super::UnicodeNfa;
 
         let opcodes = vec![Opcode::Any, Opcode::Any, Opcode::Match];

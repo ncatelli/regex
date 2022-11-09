@@ -995,28 +995,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn should_generate_correct_dot_graph() {
-        use super::nfa::{DotGeneratable, Nfa};
-        use super::UnicodeNfa;
-
-        let opcodes = vec![Opcode::Any, Opcode::Any, Opcode::Match];
-        let program = Instructions::new(vec![], opcodes);
-        let res = graph_from_runtime_instruction_set(&program);
-
-        assert!(res.is_ok());
-
-        // safe to unwrap with above assertion.
-        let graph = res.unwrap();
-        let unfa = UnicodeNfa::build_nfa(&graph).unwrap();
-
-        // assert 4 nodes in nfa.
-        assert_eq!(4, unfa.states().len());
-
-        let dot = unfa.generate_dot();
-        println!("{}", dot);
-    }
-
     #[ignore = "unimplemented"]
     #[test]
     fn should_generate_valid_nfa_from_multi_block_program() {

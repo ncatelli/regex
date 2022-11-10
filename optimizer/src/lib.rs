@@ -470,9 +470,12 @@ struct TableRow<ALPHABET: Alphabet> {
 }
 
 impl<ALPHABET: Alphabet> TableRow<ALPHABET> {
-    /// Retrieve
-    fn get(&self, key: &ALPHABET::T) -> &MappingDestination {
-        self.columns.get(key).unwrap_or(&self.default)
+    /// Retrieve a columns value from a row based on a key.
+    fn get(&self, key: Option<&ALPHABET::T>) -> &MappingDestination {
+        match key {
+            Some(key) => self.columns.get(key).unwrap_or(&self.default),
+            None => &self.epsilon,
+        }
     }
 
     /// Finds the most common `MappingDestination` value, setting it as the
@@ -684,7 +687,7 @@ impl<'a> Nfa<'a, State, char> for UnicodeNfa<'a> {
                 let non_epsilon_mapping = &self
                     .transition_table
                     .non_epsilon_column(state_id)
-                    .map(|row| row.get(c));
+                    .map(|row| row.get(Some(c)));
 
                 if epsilon_mapping == non_epsilon_mapping {
                     match epsilon_mapping {

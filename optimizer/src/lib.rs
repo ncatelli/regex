@@ -9,7 +9,7 @@ use std::ops::Range;
 use regex_runtime::*;
 
 mod nfa;
-use nfa::{Alphabet, DotGeneratable, Nfa, TransitionResult};
+use nfa::{Alphabet, DotGeneratable, DotRepr, Nfa, TransitionResult};
 
 #[derive(Debug, Hash, PartialEq, Eq)]
 struct State {
@@ -780,7 +780,7 @@ impl<'a> NfaConstructable for UnicodeNfa<'a> {
 }
 
 impl<'a> DotGeneratable for UnicodeNfa<'a> {
-    fn generate_dot(&self) -> String {
+    fn to_dot(&self) -> DotRepr<Self> {
         let graph_preamble = "digraph G {";
         let graph_postamble = "}";
 
@@ -876,14 +876,16 @@ impl<'a> DotGeneratable for UnicodeNfa<'a> {
             .map(|(src, dest)| format!("{} -> {}[label=ε];\n", src, dest))
             .collect::<String>();
 
-        format!(
+        let data = format!(
             "{}\n{}\n{}\n{}{}",
             graph_preamble,
             states,
             string_repr_of_epsilon_edges,
             non_epsilon_edges,
             graph_postamble
-        )
+        );
+
+        DotRepr::new(data)
     }
 }
 
@@ -935,9 +937,6 @@ mod tests {
 
     #[test]
     fn should_generate_valid_nfa_from_single_block_program() {
-        use super::nfa::{Alphabet, Nfa};
-        use super::UnicodeNfa;
-
         let opcodes = vec![Opcode::Any, Opcode::Any, Opcode::Match];
         let program = Instructions::new(vec![], opcodes);
         let res = graph_from_runtime_instruction_set(&program);
@@ -995,12 +994,41 @@ mod tests {
         }
     }
 
+    #[test]
+    fn should_generate_expected_dot_representation() {
+        let opcodes = vec![Opcode::Any, Opcode::Any, Opcode::Match];
+        let program = Instructions::new(vec![], opcodes);
+        let res = graph_from_runtime_instruction_set(&program);
+
+        assert!(res.is_ok());
+
+        // safe to unwrap with above assertion.
+        let graph = res.unwrap();
+        let unfa = UnicodeNfa::build_nfa(&graph).unwrap();
+
+        let dot_repr = unfa.to_dot();
+        let dot_repr_str = dot_repr.to_string();
+
+        assert!(dot_repr_str.starts_with("digraph G {") && dot_repr_str.ends_with('}'));
+        let directives = [
+            "0[shape=circle];",
+            "3[shape=doublecircle];",
+            "2[shape=circle];",
+            "1[shape=circle];",
+            "2 -> 3[label=ε];",
+            "3 -> 3[label=ε];",
+            "0 -> 1[label=any];",
+            "1 -> 2[label=any];",
+        ];
+
+        for directive in directives {
+            assert!(dot_repr_str.contains(directive));
+        }
+    }
+
     #[ignore = "unimplemented"]
     #[test]
     fn should_generate_valid_nfa_from_multi_block_program() {
-        use super::nfa::{Alphabet, Nfa};
-        use super::UnicodeNfa;
-
         let opcodes = vec![
             Opcode::Split(InstSplit::new(InstIndex::from(1), InstIndex::from(4))),
             Opcode::Consume(InstConsume::new('a')),

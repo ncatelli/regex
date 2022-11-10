@@ -116,6 +116,27 @@ where
     }
 }
 
-pub(crate) trait DotGeneratable {
-    fn generate_dot(&self) -> String;
+#[derive(Debug, Clone)]
+pub(crate) struct DotRepr<T> {
+    _kind: std::marker::PhantomData<T>,
+    data: String,
+}
+
+impl<T> DotRepr<T> {
+    pub(crate) fn new(data: String) -> Self {
+        Self {
+            _kind: std::marker::PhantomData,
+            data,
+        }
+    }
+}
+
+impl<T: Sized> std::fmt::Display for DotRepr<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.data)
+    }
+}
+
+pub(crate) trait DotGeneratable: Sized {
+    fn to_dot(&self) -> DotRepr<Self>;
 }

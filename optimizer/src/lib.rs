@@ -457,15 +457,22 @@ impl Default for MappingDestination {
     }
 }
 
+/// Represents a row in a graphs translation table.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct TableRow<ALPHABET: Alphabet> {
-    default_state: MappingDestination,
+    /// The default mapping destination. This exists to store the most-frequent
+    /// state allowing the columns mapping to store any divergence from this
+    /// state.
+    default: MappingDestination,
+    /// Stores any divergence from the default mapping.
     columns: HashMap<ALPHABET::T, MappingDestination>,
+    epsilon: MappingDestination,
 }
 
 impl<ALPHABET: Alphabet> TableRow<ALPHABET> {
+    /// Retrieve
     fn get(&self, key: &ALPHABET::T) -> &MappingDestination {
-        self.columns.get(key).unwrap_or(&self.default_state)
+        self.columns.get(key).unwrap_or(&self.default)
     }
 
     /// Finds the most common `MappingDestination` value, setting it as the
@@ -486,7 +493,7 @@ impl<ALPHABET: Alphabet> TableRow<ALPHABET> {
 
             self.columns.retain(|_, v| v != &new_default);
             self.columns.shrink_to_fit();
-            self.default_state = new_default;
+            self.default = new_default;
         }
     }
 }
@@ -494,36 +501,34 @@ impl<ALPHABET: Alphabet> TableRow<ALPHABET> {
 impl<ALPHABET: Alphabet> Default for TableRow<ALPHABET> {
     fn default() -> Self {
         Self {
-            default_state: MappingDestination::None,
+            default: MappingDestination::None,
             columns: Default::default(),
+            epsilon: MappingDestination::None,
         }
     }
 }
 
 struct TransitionTable<ALPHABET: Alphabet> {
     alphabet: std::marker::PhantomData<ALPHABET>,
-    non_epsilon_mappings: Vec<TableRow<ALPHABET>>,
-    epsilon_mappings: Vec<MappingDestination>,
+    rows: Vec<TableRow<ALPHABET>>,
 }
 
 impl TransitionTable<char> {
     fn new(states: usize) -> Self {
         let non_epsilon_mappings = vec![TableRow::default(); states];
-        let epsilon_mappings = vec![MappingDestination::None; states];
 
         Self {
             alphabet: std::marker::PhantomData,
-            non_epsilon_mappings,
-            epsilon_mappings,
+            rows: non_epsilon_mappings,
         }
     }
 
     fn epsilon_column(&self, state_id: usize) -> Option<&MappingDestination> {
-        self.epsilon_mappings.get(state_id)
+        self.rows.get(state_id).map(|row| &row.epsilon)
     }
 
     fn non_epsilon_column(&self, state_id: usize) -> Option<&TableRow<char>> {
-        self.non_epsilon_mappings.get(state_id)
+        self.rows.get(state_id)
     }
 
     fn append_destination(
@@ -533,11 +538,11 @@ impl TransitionTable<char> {
         new_val: MappingDestination,
     ) {
         let current_value = match variant {
-            Some(c) => self.non_epsilon_mappings[state_id]
+            Some(c) => self.rows[state_id]
                 .columns
                 .remove(c)
                 .unwrap_or(MappingDestination::None),
-            None => std::mem::take(&mut self.epsilon_mappings[state_id]),
+            None => std::mem::take(&mut self.rows[state_id].epsilon),
         };
 
         let appended_val = match (current_value, new_val) {
@@ -560,18 +565,16 @@ impl TransitionTable<char> {
 
         match variant {
             Some(c) => {
-                self.non_epsilon_mappings[state_id]
-                    .columns
-                    .insert(*c, appended_val);
+                self.rows[state_id].columns.insert(*c, appended_val);
             }
             None => {
-                self.epsilon_mappings[state_id] = appended_val;
+                self.rows[state_id].epsilon = appended_val;
             }
         };
     }
 }
 
-/// Generates a directed graph from a given program.
+/// Generates a directed graph from a runtime program.
 #[allow(unused)]
 fn graph_from_runtime_instruction_set(
     program: &Instructions,
@@ -764,7 +767,7 @@ impl<'a> NfaConstructable for UnicodeNfa<'a> {
                 }
 
                 // Reduce the row to the mose frequent default
-                transition_table.non_epsilon_mappings[state.id].refine();
+                transition_table.rows[state.id].refine();
             }
 
             transition_table
@@ -801,10 +804,10 @@ impl<'a> DotGeneratable for UnicodeNfa<'a> {
 
         let epsilon_edges = self
             .transition_table
-            .epsilon_mappings
+            .rows
             .iter()
             .enumerate()
-            .flat_map(|(src, mapping)| match mapping {
+            .flat_map(|(src, row)| match &row.epsilon {
                 MappingDestination::None => vec![None],
                 MappingDestination::Single(dest) => vec![Some((src, dest))],
                 MappingDestination::Multiple(dests) => dests
@@ -817,7 +820,7 @@ impl<'a> DotGeneratable for UnicodeNfa<'a> {
 
         let non_epsilon_edges = self
             .transition_table
-            .non_epsilon_mappings
+            .rows
             .iter()
             .enumerate()
             .map(|(src, row)| {
@@ -825,7 +828,7 @@ impl<'a> DotGeneratable for UnicodeNfa<'a> {
                 if mappings.is_empty() {
                     // filter out any mappings that do not have an epsilon
                     // translation.
-                    match &row.default_state {
+                    match &row.default {
                         MappingDestination::None => vec![None],
                         MappingDestination::Single(dest) => vec![Some((src, dest))],
                         MappingDestination::Multiple(dests) => dests
@@ -839,7 +842,7 @@ impl<'a> DotGeneratable for UnicodeNfa<'a> {
                     .map(|(src, dest)| format!("{} -> {}[label=any];\n", src, dest))
                     .collect::<String>()
                 } else {
-                    let default = match &row.default_state {
+                    let default = match &row.default {
                         MappingDestination::None => "".to_string(),
                         MappingDestination::Single(dest) => {
                             format!("{} -> {}[label=_];\n", src, dest)

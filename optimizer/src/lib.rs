@@ -481,15 +481,19 @@ impl<ALPHABET: Alphabet> TableRow<ALPHABET> {
     /// Finds the most common `MappingDestination` value, setting it as the
     /// default and purging the entries from the column table.
     fn refine(&mut self) {
-        let mut freq = HashMap::<&MappingDestination, usize>::new();
+        let mapping_frequency_histogram = self.columns.values().fold(
+            HashMap::<&MappingDestination, usize>::new(),
+            |mut freq, dest| {
+                freq.entry(dest)
+                    .and_modify(|counter| *counter += 1)
+                    .or_insert(1);
+                freq
+            },
+        );
 
-        for dest in self.columns.values() {
-            freq.entry(dest)
-                .and_modify(|counter| *counter += 1)
-                .or_insert(1);
-        }
-
-        let most_frequent = freq.iter().max_by_key(|(_, &occurrences)| occurrences);
+        let most_frequent = mapping_frequency_histogram
+            .iter()
+            .max_by_key(|(_, &occurrences)| occurrences);
 
         if let Some((&dest, _)) = most_frequent {
             let new_default = dest.clone();

@@ -62,7 +62,7 @@ impl RelativeOpcode {
             RelativeOpcode::Consume(c) => Some(Opcode::Consume(InstConsume::new(c))),
             RelativeOpcode::Epsilon(ec) => Some(Opcode::Epsilon(InstEpsilon::new(ec))),
             RelativeOpcode::Split(rel_x, rel_y) => {
-                let signed_idx = idx as i32;
+                let signed_idx = idx;
                 let x: u32 = (signed_idx + rel_x).try_into().ok()?;
                 let y: u32 = (signed_idx + rel_y).try_into().ok()?;
 
@@ -557,7 +557,7 @@ fn match_item(m: ast::Match) -> Result<RelativeOpcodes, String> {
                 ),
                 Quantifier::Lazy(QuantifierType::MatchExactRange(Integer(cnt)))
                 | Quantifier::Eager(QuantifierType::MatchExactRange(Integer(cnt))) => {
-                    Ok(vec![RelativeOpcode::Any; cnt as usize])
+                    Ok(vec![RelativeOpcode::Any; cnt])
                 }
                 Quantifier::Eager(QuantifierType::MatchAtLeastRange(Integer(cnt))) => Ok(
                     generate_range_quantifier_block!(eager, cnt, vec![RelativeOpcode::Any]),
@@ -615,7 +615,7 @@ fn match_item(m: ast::Match) -> Result<RelativeOpcodes, String> {
                 ),
                 Quantifier::Lazy(QuantifierType::MatchExactRange(Integer(cnt)))
                 | Quantifier::Eager(QuantifierType::MatchExactRange(Integer(cnt))) => {
-                    Ok(vec![RelativeOpcode::Consume(c); cnt as usize])
+                    Ok(vec![RelativeOpcode::Consume(c); cnt])
                 }
                 Quantifier::Eager(QuantifierType::MatchAtLeastRange(Integer(cnt))) => Ok(
                     generate_range_quantifier_block!(eager, cnt, vec![RelativeOpcode::Consume(c)]),
@@ -667,7 +667,7 @@ fn match_item(m: ast::Match) -> Result<RelativeOpcodes, String> {
             Quantifier::Lazy(QuantifierType::MatchExactRange(Integer(cnt)))
             | Quantifier::Eager(QuantifierType::MatchExactRange(Integer(cnt))) => {
                 character_class(cc).map(|rel_ops| {
-                    let multiple_of_len = rel_ops.len() * (cnt as usize);
+                    let multiple_of_len = rel_ops.len() * cnt;
 
                     rel_ops.into_iter().cycle().take(multiple_of_len).collect()
                 })
@@ -715,7 +715,7 @@ fn match_item(m: ast::Match) -> Result<RelativeOpcodes, String> {
             Quantifier::Lazy(QuantifierType::MatchExactRange(Integer(cnt)))
             | Quantifier::Eager(QuantifierType::MatchExactRange(Integer(cnt))) => {
                 character_group(cg).map(|rel_ops| {
-                    let multiple_of_len = rel_ops.len() * (cnt as usize);
+                    let multiple_of_len = rel_ops.len() * cnt;
 
                     rel_ops.into_iter().cycle().take(multiple_of_len).collect()
                 })
@@ -781,7 +781,7 @@ fn match_item(m: ast::Match) -> Result<RelativeOpcodes, String> {
                 }
                 Quantifier::Lazy(QuantifierType::MatchExactRange(Integer(cnt)))
                 | Quantifier::Eager(QuantifierType::MatchExactRange(Integer(cnt))) => {
-                    let multiple_of_len = rel_ops.len() * (cnt as usize);
+                    let multiple_of_len = rel_ops.len() * cnt;
 
                     rel_ops.into_iter().cycle().take(multiple_of_len).collect()
                 }
@@ -1041,7 +1041,7 @@ fn alternations_for_supplied_relative_opcodes(
         })
         .map(|(idx, opcodes, start_end_offsets)| {
             let optional_next_offsets =
-                (((idx as usize) + 1) != subexpr_cnt).then(|| start_end_offsets);
+                (((idx as usize) + 1) != subexpr_cnt).then_some(start_end_offsets);
             (optional_next_offsets, opcodes)
         })
         .flat_map(|(start_of_next, ops)| match start_of_next {
@@ -1124,7 +1124,7 @@ fn group(save_group_id_offset: &mut usize, g: ast::Group) -> Result<RelativeOpco
                     }) => generate_range_quantifier_block!(lazy, lower, upper, rel_ops),
                     Quantifier::Lazy(QuantifierType::MatchExactRange(Integer(cnt)))
                     | Quantifier::Eager(QuantifierType::MatchExactRange(Integer(cnt))) => {
-                        let multiple_of_len = rel_ops.len() * (cnt as usize);
+                        let multiple_of_len = rel_ops.len() * cnt;
 
                         rel_ops.into_iter().cycle().take(multiple_of_len).collect()
                     }
@@ -1177,7 +1177,7 @@ fn group(save_group_id_offset: &mut usize, g: ast::Group) -> Result<RelativeOpco
             }) => generate_range_quantifier_block!(lazy, lower, upper, rel_ops),
             Quantifier::Lazy(QuantifierType::MatchExactRange(Integer(cnt)))
             | Quantifier::Eager(QuantifierType::MatchExactRange(Integer(cnt))) => {
-                let multiple_of_len = rel_ops.len() * (cnt as usize);
+                let multiple_of_len = rel_ops.len() * cnt;
 
                 rel_ops.into_iter().cycle().take(multiple_of_len).collect()
             }

@@ -18,6 +18,11 @@ name = "binary_deserialization"
 path = "benches/deserialization.rs"
 harness = false
 
+[[bench]]
+name = "multiple_expression"
+path = "benches/multiple_expression.rs"
+harness = false
+
 [dependencies]
 collections-ext = { git = "https://github.com/ncatelli/collections-ext", branch = "main" }
 unicode-categories = { git = "https://github.com/ncatelli/unicode-categories", tag = "v0.2.0" }

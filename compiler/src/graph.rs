@@ -15,7 +15,7 @@ pub struct Node<D> {
 }
 
 impl<D> Node<D> {
-    // Instantiates a new node with the given data and no adjacent edges.
+    /// Instantiates a new node with the given data and no adjacent edges.
     pub fn new(data: D) -> Self {
         Self {
             data,
@@ -23,7 +23,7 @@ impl<D> Node<D> {
         }
     }
 
-    // Associates an edge to the node.
+    /// Associates an edge to the node.
     fn with_outgoing_edge_mut(&mut self, edge_idx: EdgeIdx) {
         self.first_outgoing_edge = Some(edge_idx);
     }

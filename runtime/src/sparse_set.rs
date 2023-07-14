@@ -23,17 +23,14 @@ impl SparseSet {
         }
     }
 
-    /// Returns `true` if the set contains no elements.
-    pub fn is_empty(&self) -> bool {
-        self.elems == 0
-    }
-
     /// Returns the number of elements that the set can hold without reallocating.
+    #[allow(unused)]
     pub fn capacity(&self) -> usize {
         self.sparse.capacity()
     }
 
     /// Returns the number of elements in the set.
+    #[allow(unused)]
     pub fn len(&self) -> usize {
         self.elems
     }
@@ -49,16 +46,8 @@ impl SparseSet {
             self.resize(val * 2)
         }
 
-        let dense_len = self.dense.len();
-        let sparse_idx = self.sparse[val];
-        if dense_len > sparse_idx && self.dense[sparse_idx].is_none() {
-            self.dense[sparse_idx] = Some(val)
-        } else {
-            self.dense.push(Some(val));
-            self.sparse[val] = dense_len;
-        }
-
-        self.elems += 1;
+        // above capacity check guarantees this call should not panic.
+        unsafe { self.insert_unchecked(val) };
     }
 
     /// Inserts a value into the set.
@@ -96,6 +85,7 @@ impl SparseSet {
             .unwrap_or(false)
     }
 
+    #[allow(unused)]
     pub fn remove(&mut self, val: &usize) -> bool {
         if self.contains(val) {
             // safety guaranteed by above contains check

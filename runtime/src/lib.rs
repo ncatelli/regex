@@ -41,9 +41,10 @@ pub mod bytecode;
 pub use bytecode::from_binary;
 
 /// Represents a defined match group for a pattern.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SaveGroupSlot {
     /// No valid match for the slot has been found.
+    #[default]
     None,
     /// A valid match has been found between the exlusive range of `start..end`.
     Complete {
@@ -94,12 +95,6 @@ impl From<SaveGroup> for SaveGroupSlot {
                 ..
             } => SaveGroupSlot::complete(expression_id, start, end),
         }
-    }
-}
-
-impl Default for SaveGroupSlot {
-    fn default() -> Self {
-        SaveGroupSlot::None
     }
 }
 

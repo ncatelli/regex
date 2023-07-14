@@ -365,7 +365,7 @@ fn generate_nested_split_expressions(
 
     let mut expr_splits = vec![];
 
-    for offset in (1..split_cnt).into_iter().rev() {
+    for offset in (1..split_cnt).rev() {
         match offset {
             offset if offset == 1 => {
                 // safe to while loop condition asserting 2 elements are present.
@@ -844,7 +844,6 @@ fn character_group(cg: ast::CharacterGroup) -> Result<RelativeOpcodes, String> {
     let sets: Vec<RelativeOpcodes> = explicit_alphabet
         .into_iter()
         .chain(other_alphabets)
-        .into_iter()
         .map(|alphabet| {
             if negated {
                 CharacterSet::exclusive(alphabet)

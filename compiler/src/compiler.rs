@@ -356,7 +356,7 @@ pub fn compile_many(regex_asts: Vec<ast::Regex>) -> Result<Instructions, String>
     Ok(Instructions::new(sets, opcodes))
 }
 
-/// from a stack of offsets, starting from last expression start first,
+/// From a stack of offsets, starting from last expression start first,
 /// generate all `Split` operations to jump to the corresponding offsets.
 fn generate_nested_split_expressions(
     mut offset_stack: Vec<i32>,
@@ -366,23 +366,19 @@ fn generate_nested_split_expressions(
     let mut expr_splits = vec![];
 
     for offset in (1..split_cnt).rev() {
-        match offset {
-            offset if offset == 1 => {
-                // safe to while loop condition asserting 2 elements are present.
-                let primary_start = offset_stack.pop().unwrap() + offset;
-                let secondary_start = offset_stack.pop().unwrap() + offset;
-                expr_splits.push(RelativeOpcode::Split(primary_start, secondary_start));
-            }
-            offset if offset > 1 => {
-                // safe to while loop condition due to guarantee there is atleast 1 element in the queue.
-                let primary_start = offset_stack.pop().unwrap() + offset;
+        // first split needs to pop the first two elements
+        if offset == 1 {
+            // safe to while loop condition asserting 2 elements are present.
+            let primary_start = offset_stack.pop().unwrap() + offset;
+            let secondary_start = offset_stack.pop().unwrap() + offset;
+            expr_splits.push(RelativeOpcode::Split(primary_start, secondary_start));
+        // evertyhing else can window.
+        } else {
+            // safe to while loop condition due to guarantee there is atleast 1 element in the queue.
+            let primary_start = offset_stack.pop().unwrap() + offset;
 
-                // jump to the next expr, with the secondary branch going to the next split
-                expr_splits.push(RelativeOpcode::Split(primary_start, 1));
-            }
-
-            // this case should never be encountered due to loop guarantee.
-            _ => unreachable!(),
+            // jump to the next expr, with the secondary branch going to the next split
+            expr_splits.push(RelativeOpcode::Split(primary_start, 1));
         }
     }
 

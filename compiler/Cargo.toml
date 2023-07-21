@@ -21,4 +21,3 @@ harness = false
 [dependencies]
 parcel = { git = "https://github.com/ncatelli/parcel", tag = "v2.0.1" }
 regex-runtime = { path = "../runtime/" }
-unicode-categories = { git = "https://github.com/ncatelli/unicode-categories", tag = "v0.2.0" }

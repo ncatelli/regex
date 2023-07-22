@@ -39,6 +39,9 @@ use std::fmt::{Debug, Display};
 pub mod bytecode;
 pub use bytecode::from_binary;
 
+/// Methods for defining and composing matchers.
+pub mod matcher;
+
 mod sparse_set;
 use sparse_set::SparseSet;
 

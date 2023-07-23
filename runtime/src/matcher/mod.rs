@@ -134,6 +134,27 @@ enum EvaluationBranch {
     Pe2,
 }
 
+/// Matches the concatenation of two patterns, similar to a logical and.
+///
+/// # Examples
+///
+/// ```
+/// use regex_runtime::matcher::*;
+///
+///  // ab
+///  let mut concat = Concatenation::new(Literal::new('a'), Literal::new('b'));
+///
+///  // happy path with "ab" input.
+///  concat.initial_state_mut();
+///  assert!(concat.advance_mut(&'a'));
+///  assert!(concat.advance_mut(&'b'));
+///  assert!(concat.is_in_accept_state());
+///
+///  // happy path with "ab" input.
+///  concat.initial_state_mut();
+///  assert!(concat.advance_mut(&'a'));
+///  assert!(!concat.advance_mut(&'c'));
+/// ```
 pub struct Concatenation<T, PE1, PE2> {
     item_ty: std::marker::PhantomData<T>,
     which: EvaluationBranch,
@@ -191,6 +212,28 @@ where
     }
 }
 
+/// Implements regular expression alternation, a logical or.
+///
+/// # Examples
+///
+/// ```
+/// use regex_runtime::matcher::*;
+///
+/// let mut alternation = Alternation::new(Literal::new('a'), Literal::new('b'));
+///
+/// // happy path with either 'a' or 'b' input.
+/// alternation.initial_state_mut();
+/// assert!(alternation.advance_mut(&'a'));
+/// assert!(alternation.is_in_accept_state());
+///
+/// alternation.initial_state_mut();
+/// assert!(alternation.advance_mut(&'b'));
+/// assert!(alternation.is_in_accept_state());
+///
+/// // fails with anything else
+/// alternation.initial_state_mut();
+/// assert!(!alternation.advance_mut(&'c'));
+/// ```
 pub struct Alternation<T, PE1, PE2> {
     item_ty: std::marker::PhantomData<T>,
 
@@ -267,24 +310,5 @@ mod tests {
         concat.initial_state_mut();
         assert!(concat.advance_mut(&'a'));
         assert!(!concat.advance_mut(&'c'));
-    }
-
-    #[test]
-    fn should_alternate_between_two_valid_evaluators() {
-        // a | b
-        let mut alternation = Alternation::new(Literal::new('a'), Literal::new('b'));
-
-        // happy path with either 'a' or 'b' input.
-        alternation.initial_state_mut();
-        assert!(alternation.advance_mut(&'a'));
-        assert!(alternation.is_in_accept_state());
-
-        alternation.initial_state_mut();
-        assert!(alternation.advance_mut(&'b'));
-        assert!(alternation.is_in_accept_state());
-
-        // fails with anything else
-        alternation.initial_state_mut();
-        assert!(!alternation.advance_mut(&'c'));
     }
 }

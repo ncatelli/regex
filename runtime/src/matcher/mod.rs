@@ -6,11 +6,11 @@ pub trait PatternEvaluatorMut {
     fn initial_state_mut(&mut self);
 
     /// Returns a boolean signifying if the match is in a final state.
-    fn is_acceptable(&self) -> bool;
+    fn is_in_accept_state(&self) -> bool;
 
     /// Attempts to advance to the next state, returning a boolean signifying
     /// the success of that advance.
-    fn advance_mut(&mut self, next: Self::Item) -> bool;
+    fn advance_mut(&mut self, next: &Self::Item) -> bool;
 }
 
 /// Matches a given value.
@@ -22,10 +22,10 @@ pub trait PatternEvaluatorMut {
 ///
 /// let mut literal_char = Literal::new('a');
 /// literal_char.initial_state_mut();
-/// assert!(literal_char.advance_mut('a'));
+/// assert!(literal_char.advance_mut(&'a'));
 ///
 /// literal_char.initial_state_mut();
-/// assert!(!literal_char.advance_mut('b'));
+/// assert!(!literal_char.advance_mut(&'b'));
 /// ```
 pub struct Literal<T> {
     literal: T,
@@ -53,18 +53,18 @@ impl<T: Eq> PatternEvaluatorMut for Literal<T> {
         self.in_acceptor_state = false;
     }
 
-    fn is_acceptable(&self) -> bool {
+    fn is_in_accept_state(&self) -> bool {
         self.in_acceptor_state
     }
 
-    fn advance_mut(&mut self, next: Self::Item) -> bool {
+    fn advance_mut(&mut self, next: &Self::Item) -> bool {
         if !self.in_initial_state {
             return false;
         }
 
         // transition out of initial state.
         self.in_initial_state = false;
-        self.in_acceptor_state = self.literal == next;
+        self.in_acceptor_state = &self.literal == next;
         self.in_acceptor_state
     }
 }
@@ -78,7 +78,7 @@ impl<T: Eq> PatternEvaluatorMut for Literal<T> {
 ///
 /// let mut any_char = Any::new();
 /// any_char.initial_state_mut();
-/// assert!(any_char.advance_mut('a'));
+/// assert!(any_char.advance_mut(&'a'));
 /// ```
 pub struct Any<T> {
     item_ty: std::marker::PhantomData<T>,
@@ -106,11 +106,11 @@ impl<T> PatternEvaluatorMut for Any<T> {
         self.in_acceptor_state = false;
     }
 
-    fn is_acceptable(&self) -> bool {
+    fn is_in_accept_state(&self) -> bool {
         self.in_acceptor_state
     }
 
-    fn advance_mut(&mut self, _: Self::Item) -> bool {
+    fn advance_mut(&mut self, _: &Self::Item) -> bool {
         if !self.in_initial_state {
             return false;
         }
@@ -128,9 +128,15 @@ impl<T> Default for Any<T> {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum EvaluationBranch {
+    Pe1,
+    Pe2,
+}
+
 pub struct Concatenation<T, PE1, PE2> {
     item_ty: std::marker::PhantomData<T>,
-    pe1_accepted: bool,
+    which: EvaluationBranch,
     pe1: PE1,
     pe2: PE2,
 }
@@ -139,7 +145,7 @@ impl<T, PE1, PE2> Concatenation<T, PE1, PE2> {
     pub fn new(pe1: PE1, pe2: PE2) -> Self {
         Self {
             item_ty: std::marker::PhantomData,
-            pe1_accepted: false,
+            which: EvaluationBranch::Pe1,
             pe1,
             pe2,
         }
@@ -155,27 +161,90 @@ where
 
     fn initial_state_mut(&mut self) {
         self.pe1.initial_state_mut();
-        self.pe1_accepted = false;
+        self.which = EvaluationBranch::Pe1;
     }
 
-    fn is_acceptable(&self) -> bool {
-        self.pe1_accepted && self.pe2.is_acceptable()
+    fn is_in_accept_state(&self) -> bool {
+        self.pe1.is_in_accept_state() && self.pe2.is_in_accept_state()
     }
 
-    fn advance_mut(&mut self, next: Self::Item) -> bool {
-        if !self.pe1_accepted {
+    fn advance_mut(&mut self, next: &Self::Item) -> bool {
+        if self.is_in_accept_state() {
+            return false;
+        }
+
+        if self.which == EvaluationBranch::Pe1 {
             let advanced = self.pe1.advance_mut(next);
             // check if pe1 has advanced into an accept state.
-            let pe1_accepted = self.pe1.is_acceptable();
+            let pe1_accepted = self.pe1.is_in_accept_state();
             // if pe1 transitions into an accept state, initialize p2.
             if pe1_accepted {
-                self.pe1_accepted = pe1_accepted;
+                // switch to pe2
+                self.which = EvaluationBranch::Pe2;
                 self.pe2.initial_state_mut();
             }
 
             advanced
         } else {
             self.pe2.advance_mut(next)
+        }
+    }
+}
+
+pub struct Alternation<T, PE1, PE2> {
+    item_ty: std::marker::PhantomData<T>,
+
+    which: EvaluationBranch,
+    pe1: PE1,
+    pe2: PE2,
+}
+
+impl<T, PE1, PE2> Alternation<T, PE1, PE2> {
+    pub fn new(pe1: PE1, pe2: PE2) -> Self {
+        Self {
+            item_ty: std::marker::PhantomData,
+            which: EvaluationBranch::Pe1,
+            pe1,
+            pe2,
+        }
+    }
+}
+
+impl<T, PE1, PE2> PatternEvaluatorMut for Alternation<T, PE1, PE2>
+where
+    PE1: PatternEvaluatorMut<Item = T>,
+    PE2: PatternEvaluatorMut<Item = T>,
+{
+    type Item = T;
+
+    fn initial_state_mut(&mut self) {
+        self.pe1.initial_state_mut();
+        self.which = EvaluationBranch::Pe1;
+    }
+
+    fn is_in_accept_state(&self) -> bool {
+        self.pe1.is_in_accept_state() || self.pe2.is_in_accept_state()
+    }
+
+    fn advance_mut(&mut self, next: &Self::Item) -> bool {
+        if self.is_in_accept_state() {
+            return false;
+        };
+
+        if self.which == EvaluationBranch::Pe2 {
+            self.pe2.advance_mut(next)
+        } else {
+            let advanced = self.pe1.advance_mut(next);
+
+            // if pe1 can advance, accept that input
+            if advanced {
+                advanced
+            // otherwise switch to, and evaluate, pe2
+            } else {
+                self.which = EvaluationBranch::Pe2;
+                self.pe2.initial_state_mut();
+                self.pe2.advance_mut(next)
+            }
         }
     }
 }
@@ -191,12 +260,31 @@ mod tests {
 
         // happy path with "ab" input.
         concat.initial_state_mut();
-        assert!(concat.advance_mut('a'));
-        assert!(concat.advance_mut('b'));
+        assert!(concat.advance_mut(&'a'));
+        assert!(concat.advance_mut(&'b'));
 
         // happy path with "ab" input.
         concat.initial_state_mut();
-        assert!(concat.advance_mut('a'));
-        assert!(!concat.advance_mut('c'));
+        assert!(concat.advance_mut(&'a'));
+        assert!(!concat.advance_mut(&'c'));
+    }
+
+    #[test]
+    fn should_alternate_between_two_valid_evaluators() {
+        // a | b
+        let mut alternation = Alternation::new(Literal::new('a'), Literal::new('b'));
+
+        // happy path with either 'a' or 'b' input.
+        alternation.initial_state_mut();
+        assert!(alternation.advance_mut(&'a'));
+        assert!(alternation.is_in_accept_state());
+
+        alternation.initial_state_mut();
+        assert!(alternation.advance_mut(&'b'));
+        assert!(alternation.is_in_accept_state());
+
+        // fails with anything else
+        alternation.initial_state_mut();
+        assert!(!alternation.advance_mut(&'c'));
     }
 }

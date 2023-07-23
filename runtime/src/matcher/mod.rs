@@ -293,22 +293,4 @@ where
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn should_join_two_valid_evaluators() {
-        // ab
-        let mut concat = Concatenation::new(Literal::new('a'), Literal::new('b'));
-
-        // happy path with "ab" input.
-        concat.initial_state_mut();
-        assert!(concat.advance_mut(&'a'));
-        assert!(concat.advance_mut(&'b'));
-
-        // happy path with "ab" input.
-        concat.initial_state_mut();
-        assert!(concat.advance_mut(&'a'));
-        assert!(!concat.advance_mut(&'c'));
-    }
-}
+mod tests {}

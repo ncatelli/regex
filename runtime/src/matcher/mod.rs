@@ -8,6 +8,9 @@ pub trait PatternEvaluatorMut {
     /// Returns a boolean signifying if the match is in a final state.
     fn is_in_accept_state(&self) -> bool;
 
+    // signifies there are no additional transitions
+    fn is_completed(&self) -> bool;
+
     /// Attempts to advance to the next state, returning a boolean signifying
     /// the success of that advance.
     fn advance_mut(&mut self, next: &Self::Item) -> bool;
@@ -23,14 +26,19 @@ pub trait PatternEvaluatorMut {
 /// let mut literal_char = Literal::new('a');
 /// literal_char.initial_state_mut();
 /// assert!(literal_char.advance_mut(&'a'));
+/// assert!(literal_char.is_in_accept_state());
+/// assert!(literal_char.is_completed());
 ///
 /// literal_char.initial_state_mut();
 /// assert!(!literal_char.advance_mut(&'b'));
+/// assert!(!literal_char.is_in_accept_state());
+/// assert!(literal_char.is_completed());
 /// ```
 pub struct Literal<T> {
     literal: T,
     in_initial_state: bool,
     in_acceptor_state: bool,
+    completed: bool,
 }
 
 impl<T> Literal<T> {
@@ -40,6 +48,7 @@ impl<T> Literal<T> {
             literal,
             in_initial_state: false,
             in_acceptor_state: false,
+            completed: false,
         }
     }
 }
@@ -50,6 +59,7 @@ impl<T: Eq> PatternEvaluatorMut for Literal<T> {
     fn initial_state_mut(&mut self) {
         // clear the acceptor state if set and set as in initial state.
         self.in_initial_state = true;
+        self.completed = !self.in_initial_state;
         self.in_acceptor_state = false;
     }
 
@@ -57,13 +67,18 @@ impl<T: Eq> PatternEvaluatorMut for Literal<T> {
         self.in_acceptor_state
     }
 
+    fn is_completed(&self) -> bool {
+        self.completed
+    }
+
     fn advance_mut(&mut self, next: &Self::Item) -> bool {
-        if !self.in_initial_state {
+        if self.is_completed() {
             return false;
         }
 
         // transition out of initial state.
         self.in_initial_state = false;
+        self.completed = true;
         self.in_acceptor_state = &self.literal == next;
         self.in_acceptor_state
     }
@@ -79,11 +94,14 @@ impl<T: Eq> PatternEvaluatorMut for Literal<T> {
 /// let mut any_char = Any::new();
 /// any_char.initial_state_mut();
 /// assert!(any_char.advance_mut(&'a'));
+/// assert!(any_char.is_in_accept_state());
+/// assert!(any_char.is_completed());
 /// ```
 pub struct Any<T> {
     item_ty: std::marker::PhantomData<T>,
     in_initial_state: bool,
     in_acceptor_state: bool,
+    completed: bool,
 }
 
 impl<T> Any<T> {
@@ -91,7 +109,8 @@ impl<T> Any<T> {
     pub fn new() -> Self {
         Self {
             item_ty: std::marker::PhantomData,
-            in_initial_state: false,
+            in_initial_state: true,
+            completed: false,
             in_acceptor_state: false,
         }
     }
@@ -103,6 +122,7 @@ impl<T> PatternEvaluatorMut for Any<T> {
     fn initial_state_mut(&mut self) {
         // clear the acceptor state if set and set as in initial state.
         self.in_initial_state = true;
+        self.completed = !self.in_initial_state;
         self.in_acceptor_state = false;
     }
 
@@ -110,13 +130,18 @@ impl<T> PatternEvaluatorMut for Any<T> {
         self.in_acceptor_state
     }
 
+    fn is_completed(&self) -> bool {
+        self.completed
+    }
+
     fn advance_mut(&mut self, _: &Self::Item) -> bool {
-        if !self.in_initial_state {
+        if self.is_completed() {
             return false;
         }
 
         // transition out of initial state.
         self.in_initial_state = false;
+        self.completed = true;
         self.in_acceptor_state = true;
         self.in_acceptor_state
     }
@@ -126,12 +151,6 @@ impl<T> Default for Any<T> {
     fn default() -> Self {
         Self::new()
     }
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum EvaluationBranch {
-    Pe1,
-    Pe2,
 }
 
 /// Matches the concatenation of two patterns, similar to a logical and.
@@ -157,8 +176,9 @@ enum EvaluationBranch {
 /// ```
 pub struct Concatenation<T, PE1, PE2> {
     item_ty: std::marker::PhantomData<T>,
-    which: EvaluationBranch,
     pe1: PE1,
+    pe1_was_accepted: bool,
+    pe1_was_completed: bool,
     pe2: PE2,
 }
 
@@ -166,8 +186,9 @@ impl<T, PE1, PE2> Concatenation<T, PE1, PE2> {
     pub fn new(pe1: PE1, pe2: PE2) -> Self {
         Self {
             item_ty: std::marker::PhantomData,
-            which: EvaluationBranch::Pe1,
             pe1,
+            pe1_was_accepted: false,
+            pe1_was_completed: false,
             pe2,
         }
     }
@@ -182,32 +203,49 @@ where
 
     fn initial_state_mut(&mut self) {
         self.pe1.initial_state_mut();
-        self.which = EvaluationBranch::Pe1;
+        self.pe1_was_accepted = false;
+        self.pe1_was_completed = false;
+        self.pe2.initial_state_mut();
     }
 
     fn is_in_accept_state(&self) -> bool {
-        self.pe1.is_in_accept_state() && self.pe2.is_in_accept_state()
+        self.pe1_was_accepted && self.pe2.is_in_accept_state()
+    }
+
+    fn is_completed(&self) -> bool {
+        self.pe1.is_completed() && self.pe2.is_completed()
     }
 
     fn advance_mut(&mut self, next: &Self::Item) -> bool {
-        if self.is_in_accept_state() {
+        if self.is_completed() {
             return false;
         }
 
-        if self.which == EvaluationBranch::Pe1 {
-            let advanced = self.pe1.advance_mut(next);
-            // check if pe1 has advanced into an accept state.
-            let pe1_accepted = self.pe1.is_in_accept_state();
-            // if pe1 transitions into an accept state, initialize p2.
-            if pe1_accepted {
-                // switch to pe2
-                self.which = EvaluationBranch::Pe2;
-                self.pe2.initial_state_mut();
-            }
+        let pe1_was_accepted = self.pe1.is_in_accept_state();
 
-            advanced
+        let pe1_advanced = if !self.pe1_was_completed {
+            self.pe1.advance_mut(next)
         } else {
-            self.pe2.advance_mut(next)
+            false
+        };
+
+        if !pe1_advanced && pe1_was_accepted {
+            self.pe1_was_accepted = true;
+            self.pe1_was_completed = true;
+        } else if !pe1_advanced {
+            self.pe1_was_completed = true;
+        }
+
+        let pe1_was_completed_and_accepted = self.pe1_was_accepted && self.pe1_was_completed;
+
+        let pe2_advanced = self.pe2.advance_mut(next);
+        if (pe1_was_completed_and_accepted) && pe2_advanced {
+            pe2_advanced
+        } else if pe1_advanced && !pe2_advanced {
+            self.pe2.initial_state_mut();
+            true
+        } else {
+            false
         }
     }
 }
@@ -237,7 +275,6 @@ where
 pub struct Alternation<T, PE1, PE2> {
     item_ty: std::marker::PhantomData<T>,
 
-    which: EvaluationBranch,
     pe1: PE1,
     pe2: PE2,
 }
@@ -246,7 +283,6 @@ impl<T, PE1, PE2> Alternation<T, PE1, PE2> {
     pub fn new(pe1: PE1, pe2: PE2) -> Self {
         Self {
             item_ty: std::marker::PhantomData,
-            which: EvaluationBranch::Pe1,
             pe1,
             pe2,
         }
@@ -262,33 +298,33 @@ where
 
     fn initial_state_mut(&mut self) {
         self.pe1.initial_state_mut();
-        self.which = EvaluationBranch::Pe1;
+        self.pe2.initial_state_mut();
     }
 
     fn is_in_accept_state(&self) -> bool {
         self.pe1.is_in_accept_state() || self.pe2.is_in_accept_state()
     }
 
+    fn is_completed(&self) -> bool {
+        self.pe1.is_completed() && self.pe2.is_completed()
+    }
+
     fn advance_mut(&mut self, next: &Self::Item) -> bool {
-        if self.is_in_accept_state() {
+        if self.is_completed() {
             return false;
         };
 
-        if self.which == EvaluationBranch::Pe2 {
-            self.pe2.advance_mut(next)
-        } else {
-            let advanced = self.pe1.advance_mut(next);
+        let mut either_advanced = false;
 
-            // if pe1 can advance, accept that input
-            if advanced {
-                advanced
-            // otherwise switch to, and evaluate, pe2
-            } else {
-                self.which = EvaluationBranch::Pe2;
-                self.pe2.initial_state_mut();
-                self.pe2.advance_mut(next)
-            }
+        if !self.pe1.is_completed() && self.pe1.advance_mut(next) {
+            either_advanced = true;
         }
+
+        if !self.pe2.is_completed() && self.pe2.advance_mut(next) {
+            either_advanced = true;
+        }
+
+        either_advanced
     }
 }
 
@@ -318,7 +354,7 @@ pub struct ZeroOrOne<T, PE> {
     item_ty: std::marker::PhantomData<T>,
 
     pe: PE,
-    pe_evaluation_completed: bool,
+    completed: bool,
 }
 
 impl<T, PE> ZeroOrOne<T, PE> {
@@ -326,7 +362,7 @@ impl<T, PE> ZeroOrOne<T, PE> {
         Self {
             item_ty: std::marker::PhantomData,
             pe,
-            pe_evaluation_completed: false,
+            completed: false,
         }
     }
 }
@@ -339,29 +375,27 @@ where
 
     fn initial_state_mut(&mut self) {
         self.pe.initial_state_mut();
-        self.pe_evaluation_completed = false;
+        self.completed = false;
     }
 
     fn is_in_accept_state(&self) -> bool {
         let pe_in_accept_state = self.pe.is_in_accept_state();
-        let pe_evaluated = self.pe_evaluation_completed;
+        let pe_evaluated = self.pe.is_completed();
 
         // either the pe is in an acceptible state or it has been evaluated and ignored.
         pe_in_accept_state || pe_evaluated
     }
 
+    fn is_completed(&self) -> bool {
+        self.pe.is_completed()
+    }
+
     fn advance_mut(&mut self, next: &Self::Item) -> bool {
-        if self.is_in_accept_state() {
-            self.pe_evaluation_completed = true;
+        if self.pe.is_completed() {
             return false;
         };
 
-        if self.pe.advance_mut(next) {
-            true
-        } else {
-            self.pe_evaluation_completed = true;
-            false
-        }
+        self.pe.advance_mut(next)
     }
 }
 
@@ -372,10 +406,10 @@ where
 /// ```
 /// use regex_runtime::matcher::*;
 ///
-/// let mut zero_or_more = ZeroOrMore::new(Literal::new('a'));
 ///
 /// // matches one
 ///
+/// let mut zero_or_more = ZeroOrMore::new(Literal::new('a'));
 /// zero_or_more.initial_state_mut();
 /// // take more than one
 /// assert!(zero_or_more.advance_mut(&'a'));
@@ -385,6 +419,7 @@ where
 ///
 /// // matches zero
 ///
+/// let mut zero_or_more = ZeroOrMore::new(Literal::new('a'));
 /// zero_or_more.initial_state_mut();
 /// // should not advance but should still be acceptable
 /// assert!(!zero_or_more.advance_mut(&'b'));
@@ -394,7 +429,7 @@ pub struct ZeroOrMore<T, PE> {
     item_ty: std::marker::PhantomData<T>,
 
     pe: PE,
-    pe_evaluation_completed: bool,
+    completed: bool,
     match_count: usize,
 }
 
@@ -403,7 +438,7 @@ impl<T, PE> ZeroOrMore<T, PE> {
         Self {
             item_ty: std::marker::PhantomData,
             pe,
-            pe_evaluation_completed: false,
+            completed: false,
             match_count: 0,
         }
     }
@@ -417,21 +452,23 @@ where
 
     fn initial_state_mut(&mut self) {
         self.pe.initial_state_mut();
-        self.pe_evaluation_completed = false;
-        self.match_count = 0;
+        self.completed = false;
     }
 
     fn is_in_accept_state(&self) -> bool {
         let pe_in_accept_state = self.pe.is_in_accept_state();
-        let pe_evaluated = self.pe_evaluation_completed;
+        let pe_evaluated = self.pe.is_completed();
 
         // either the pe is in an acceptible state or it has been evaluated and ignored.
         pe_in_accept_state || pe_evaluated
     }
 
+    fn is_completed(&self) -> bool {
+        self.completed
+    }
+
     fn advance_mut(&mut self, next: &Self::Item) -> bool {
-        if self.is_in_accept_state() {
-            self.pe_evaluation_completed = true;
+        if self.pe.is_in_accept_state() && self.pe.is_completed() {
             self.match_count += 1;
 
             // reset the sub-expression
@@ -442,11 +479,125 @@ where
         if self.pe.advance_mut(next) {
             true
         } else {
-            self.pe_evaluation_completed = true;
+            self.completed = true;
+            false
+        }
+    }
+}
+
+/// Matches either one or more sub-expressions.
+///
+/// # Examples
+///
+/// ```
+/// use regex_runtime::matcher::*;
+///
+///
+/// // matches one
+///
+/// let mut one_or_more = OneOrMore::new(Literal::new('a'));
+/// one_or_more.initial_state_mut();
+/// // take more than one
+/// assert!(one_or_more.advance_mut(&'a'));
+/// assert!(one_or_more.advance_mut(&'a'));
+/// assert!(one_or_more.advance_mut(&'a'));
+/// assert!(one_or_more.is_in_accept_state());
+///
+/// // matches one
+///
+/// let mut one_or_more = OneOrMore::new(Literal::new('a'));
+/// one_or_more.initial_state_mut();
+/// // should not advance after the `b` but should still be acceptable
+/// assert!(one_or_more.advance_mut(&'a'));
+/// assert!(!one_or_more.advance_mut(&'b'));
+/// assert!(one_or_more.is_in_accept_state());
+///
+/// // fails to match one
+///
+/// let mut one_or_more = OneOrMore::new(Literal::new('a'));
+/// one_or_more.initial_state_mut();
+/// // should not advance and shouldn't be accepted
+/// assert!(!one_or_more.advance_mut(&'b'));
+/// assert!(!one_or_more.is_in_accept_state());
+/// ```
+pub struct OneOrMore<T, PE> {
+    item_ty: std::marker::PhantomData<T>,
+
+    pe: PE,
+    completed: bool,
+    match_count: usize,
+}
+
+impl<T, PE> OneOrMore<T, PE> {
+    pub fn new(pe: PE) -> Self {
+        Self {
+            item_ty: std::marker::PhantomData,
+            pe,
+            completed: false,
+            match_count: 0,
+        }
+    }
+}
+
+impl<T, PE> PatternEvaluatorMut for OneOrMore<T, PE>
+where
+    PE: PatternEvaluatorMut<Item = T>,
+{
+    type Item = T;
+
+    fn initial_state_mut(&mut self) {
+        self.pe.initial_state_mut();
+        self.completed = false;
+    }
+
+    fn is_in_accept_state(&self) -> bool {
+        let pe_in_accept_state = self.pe.is_in_accept_state();
+        let has_atleast_one_match = self.match_count > 0;
+
+        // it's acceptable if it has atleast one match
+        pe_in_accept_state || has_atleast_one_match
+    }
+
+    fn is_completed(&self) -> bool {
+        self.completed
+    }
+
+    fn advance_mut(&mut self, next: &Self::Item) -> bool {
+        if self.pe.is_in_accept_state() && self.pe.is_completed() {
+            self.match_count += 1;
+
+            // reset the sub-expression
+            self.pe.initial_state_mut();
+        };
+
+        // advance until completed
+        if self.pe.advance_mut(next) {
+            true
+        } else {
+            self.completed = true;
             false
         }
     }
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::*;
+
+    #[test]
+    fn should_accepted_unanchored_match_expression() {
+        let input = "aaaab";
+
+        let literal = Literal::new('a');
+        let unanchored_prefix = ZeroOrMore::new(Any::new());
+        let mut expression = Alternation::new(unanchored_prefix, literal);
+
+        expression.initial_state_mut();
+
+        for char in input.chars() {
+            assert!(expression.advance_mut(&char));
+        }
+
+        assert!(expression.is_in_accept_state());
+    }
+}

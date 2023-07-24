@@ -292,5 +292,78 @@ where
     }
 }
 
+/// Matches either zero or one sub-expressions.
+///
+/// # Examples
+///
+/// ```
+/// use regex_runtime::matcher::*;
+///
+/// let mut zero_or_one = ZeroOrOne::new(Literal::new('a'));
+///
+/// // matches one
+///
+/// zero_or_one.initial_state_mut();
+/// assert!(zero_or_one.advance_mut(&'a'));
+/// assert!(zero_or_one.is_in_accept_state());
+///
+/// // matches zero
+///
+/// zero_or_one.initial_state_mut();
+/// // should not advance but should still be acceptable
+/// assert!(!zero_or_one.advance_mut(&'b'));
+/// assert!(zero_or_one.is_in_accept_state());
+/// ```
+pub struct ZeroOrOne<T, PE> {
+    item_ty: std::marker::PhantomData<T>,
+
+    pe: PE,
+    pe_evaluation_completed: bool,
+}
+
+impl<T, PE> ZeroOrOne<T, PE> {
+    pub fn new(pe: PE) -> Self {
+        Self {
+            item_ty: std::marker::PhantomData,
+            pe,
+            pe_evaluation_completed: false,
+        }
+    }
+}
+
+impl<T, PE> PatternEvaluatorMut for ZeroOrOne<T, PE>
+where
+    PE: PatternEvaluatorMut<Item = T>,
+{
+    type Item = T;
+
+    fn initial_state_mut(&mut self) {
+        self.pe.initial_state_mut();
+        self.pe_evaluation_completed = false;
+    }
+
+    fn is_in_accept_state(&self) -> bool {
+        let pe_in_accept_state = self.pe.is_in_accept_state();
+        let pe_evaluated = self.pe_evaluation_completed;
+
+        // either the pe is in an acceptible state or it has been evaluated and ignored.
+        pe_in_accept_state || pe_evaluated
+    }
+
+    fn advance_mut(&mut self, next: &Self::Item) -> bool {
+        if self.is_in_accept_state() {
+            self.pe_evaluation_completed = true;
+            return false;
+        };
+
+        if self.pe.advance_mut(next) {
+            true
+        } else {
+            self.pe_evaluation_completed = true;
+            false
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {}

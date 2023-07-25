@@ -2,7 +2,12 @@ pub trait PatternEvaluatorMut {
     /// The input interable type to be compared.
     type Item;
 
-    // Defines the evaluator as being in the initial state.
+    /// Resets the evaluator to it's initial state and clears any contextual
+    /// state.
+    fn reset_mut(&mut self);
+
+    /// Defines the evaluator as being in the initial state. Without resetting
+    /// contextual state.
     fn initial_state_mut(&mut self);
 
     /// Returns a boolean signifying if the match is in a final state.
@@ -55,6 +60,10 @@ impl<T> Literal<T> {
 
 impl<T: Eq> PatternEvaluatorMut for Literal<T> {
     type Item = T;
+
+    fn reset_mut(&mut self) {
+        self.initial_state_mut()
+    }
 
     fn initial_state_mut(&mut self) {
         // clear the acceptor state if set and set as in initial state.
@@ -118,6 +127,10 @@ impl<T> Any<T> {
 
 impl<T> PatternEvaluatorMut for Any<T> {
     type Item = T;
+
+    fn reset_mut(&mut self) {
+        self.initial_state_mut()
+    }
 
     fn initial_state_mut(&mut self) {
         // clear the acceptor state if set and set as in initial state.
@@ -201,6 +214,13 @@ where
 {
     type Item = T;
 
+    fn reset_mut(&mut self) {
+        self.pe1.reset_mut();
+        self.pe1_was_accepted = false;
+        self.pe1_was_completed = false;
+        self.pe2.reset_mut();
+    }
+
     fn initial_state_mut(&mut self) {
         self.pe1.initial_state_mut();
         self.pe1_was_accepted = false;
@@ -242,7 +262,7 @@ where
         if (pe1_was_completed_and_accepted) && pe2_advanced {
             pe2_advanced
         } else if pe1_advanced && !pe2_advanced {
-            self.pe2.initial_state_mut();
+            self.pe2.reset_mut();
             true
         } else {
             false
@@ -295,6 +315,11 @@ where
     PE2: PatternEvaluatorMut<Item = T>,
 {
     type Item = T;
+
+    fn reset_mut(&mut self) {
+        self.pe1.reset_mut();
+        self.pe2.reset_mut();
+    }
 
     fn initial_state_mut(&mut self) {
         self.pe1.initial_state_mut();
@@ -373,6 +398,11 @@ where
 {
     type Item = T;
 
+    fn reset_mut(&mut self) {
+        self.pe.reset_mut();
+        self.completed = false;
+    }
+
     fn initial_state_mut(&mut self) {
         self.pe.initial_state_mut();
         self.completed = false;
@@ -419,7 +449,7 @@ where
 ///
 /// // matches zero
 ///
-/// let mut zero_or_more = ZeroOrMore::new(Literal::new('a'));
+/// zero_or_more.reset_mut();
 /// zero_or_more.initial_state_mut();
 /// // should not advance but should still be acceptable
 /// assert!(!zero_or_more.advance_mut(&'b'));
@@ -449,6 +479,12 @@ where
     PE: PatternEvaluatorMut<Item = T>,
 {
     type Item = T;
+
+    fn reset_mut(&mut self) {
+        self.pe.reset_mut();
+        self.completed = false;
+        self.match_count = 0;
+    }
 
     fn initial_state_mut(&mut self) {
         self.pe.initial_state_mut();
@@ -505,7 +541,7 @@ where
 ///
 /// // matches one
 ///
-/// let mut one_or_more = OneOrMore::new(Literal::new('a'));
+/// one_or_more.reset_mut();
 /// one_or_more.initial_state_mut();
 /// // should not advance after the `b` but should still be acceptable
 /// assert!(one_or_more.advance_mut(&'a'));
@@ -514,7 +550,7 @@ where
 ///
 /// // fails to match one
 ///
-/// let mut one_or_more = OneOrMore::new(Literal::new('a'));
+/// one_or_more.reset_mut();
 /// one_or_more.initial_state_mut();
 /// // should not advance and shouldn't be accepted
 /// assert!(!one_or_more.advance_mut(&'b'));
@@ -544,6 +580,12 @@ where
     PE: PatternEvaluatorMut<Item = T>,
 {
     type Item = T;
+
+    fn reset_mut(&mut self) {
+        self.pe.reset_mut();
+        self.completed = false;
+        self.match_count = 0;
+    }
 
     fn initial_state_mut(&mut self) {
         self.pe.initial_state_mut();
@@ -591,6 +633,24 @@ mod tests {
         let literal = Literal::new('a');
         let unanchored_prefix = ZeroOrMore::new(Any::new());
         let mut expression = Alternation::new(unanchored_prefix, literal);
+
+        expression.initial_state_mut();
+
+        for char in input.chars() {
+            assert!(expression.advance_mut(&char));
+        }
+
+        assert!(expression.is_in_accept_state());
+    }
+
+    #[test]
+    #[ignore = "fixing concat"]
+    fn should_accepted_unanchored_concat_match_expression() {
+        let input = "aaaab";
+
+        let literal = Literal::new('a');
+        let unanchored_prefix = ZeroOrMore::new(Any::new());
+        let mut expression = Concatenation::new(unanchored_prefix, literal);
 
         expression.initial_state_mut();
 

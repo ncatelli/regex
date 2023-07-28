@@ -30,6 +30,68 @@ pub trait PatternEvaluatorMut: Sized {
     }
 }
 
+/// Matches any given value.
+///
+/// # Examples
+///
+/// ```
+/// use regex_runtime::matcher::*;
+///
+/// let mut any_char = Any::new().initial_state();
+///
+/// // Advances one character.
+/// assert_eq!(Some(&'a'), any_char.advance_mut(&'a'));
+/// assert!(any_char.is_in_accept_state());
+///
+/// any_char.initial_state_mut();
+/// assert!(any_char.matches("a".chars()));
+///
+/// any_char.initial_state_mut();
+/// assert!(!any_char.matches("ab".chars()));
+/// ```
+pub struct Any<T> {
+    ty: std::marker::PhantomData<T>,
+    in_initial_state: bool,
+    is_in_final_state: bool,
+}
+
+impl<T> Any<T> {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            ty: std::marker::PhantomData,
+            in_initial_state: true,
+            is_in_final_state: false,
+        }
+    }
+}
+
+impl<T: Eq> PatternEvaluatorMut for Any<T> {
+    type Item = T;
+
+    fn initial_state_mut(&mut self) {
+        // clear the acceptor state if set and set as in initial state.
+        self.in_initial_state = true;
+    }
+
+    fn is_in_accept_state(&self) -> bool {
+        self.is_in_final_state
+    }
+
+    fn advance_mut<'a>(&mut self, next: &'a Self::Item) -> Option<&'a Self::Item> {
+        self.is_in_final_state = self.in_initial_state;
+        self.in_initial_state = !self.is_in_final_state;
+
+        self.is_in_final_state.then_some(next)
+    }
+}
+
+impl<T> Default for Any<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Matches a given value.
 ///
 /// # Examples
@@ -87,6 +149,8 @@ impl<T: Eq> PatternEvaluatorMut for Literal<T> {
         let next_matches_literal = next == &self.literal;
 
         self.is_in_final_state = self.in_initial_state && next_matches_literal;
+        self.in_initial_state = !self.is_in_final_state;
+
         self.is_in_final_state.then_some(next)
     }
 }

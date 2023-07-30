@@ -30,6 +30,63 @@ pub trait PatternEvaluatorMut: Sized {
     }
 }
 
+/// Matches no input.
+///
+/// # Examples
+///
+/// ```
+/// use regex_runtime::matcher::*;
+///
+/// let mut nothing = Nothing::new().initial_state();
+///
+/// assert_eq!(None, nothing.advance_mut(&'a'));
+/// assert!(!nothing.is_in_accept_state());
+///
+/// nothing.initial_state_mut();
+/// assert!(nothing.matches("".chars()));
+///
+/// nothing.initial_state_mut();
+/// assert!(!nothing.matches("a".chars()));
+/// ```
+pub struct Nothing<T> {
+    ty: std::marker::PhantomData<T>,
+    is_in_final_state: bool,
+}
+
+impl<T> Nothing<T> {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            ty: std::marker::PhantomData,
+            is_in_final_state: true,
+        }
+    }
+}
+
+impl<T> PatternEvaluatorMut for Nothing<T> {
+    type Item = T;
+
+    fn initial_state_mut(&mut self) {
+        self.is_in_final_state = true;
+    }
+
+    fn is_in_accept_state(&self) -> bool {
+        self.is_in_final_state
+    }
+
+    fn advance_mut<'a>(&mut self, _: &'a Self::Item) -> Option<&'a Self::Item> {
+        self.is_in_final_state = false;
+
+        None
+    }
+}
+
+impl<T> Default for Nothing<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Matches any given value.
 ///
 /// # Examples
@@ -250,7 +307,6 @@ where
 /// alt.initial_state_mut();
 /// assert!(!alt.matches("c".chars()));
 /// assert!(!alt.is_in_accept_state());
-///
 /// ```
 pub struct Alternation<T, PE1, PE2> {
     ty: std::marker::PhantomData<T>,
@@ -294,6 +350,68 @@ where
         } else {
             self.pe2.advance_mut(next)
         }
+    }
+}
+
+/// Matches either zero or one instance of a sub-matcher.
+///
+/// # Examples
+///
+/// ```
+/// use regex_runtime::matcher::*;
+///
+/// let literal_a = Literal::new('a');
+/// let mut zero_or_one = ZeroOrOne::new(literal_a).initial_state();
+///
+/// // matches either a | b.
+/// assert!(zero_or_one.matches("a".chars()));
+/// assert!(zero_or_one.is_in_accept_state());
+///
+/// zero_or_one.initial_state_mut();
+/// assert!(zero_or_one.matches("".chars()));
+/// assert!(zero_or_one.is_in_accept_state());
+///
+/// // Ignores the first match, matching the literal.
+/// let mut zero_or_one = Concatenation::new(ZeroOrOne::new(Literal::new('a')), Literal::new('a'))
+///     .initial_state();
+///
+/// zero_or_one.initial_state_mut();
+/// assert!(zero_or_one.matches("a".chars()));
+/// assert!(zero_or_one.is_in_accept_state());
+/// ```
+pub struct ZeroOrOne<T, PE> {
+    ty: std::marker::PhantomData<T>,
+    pe: Alternation<T, PE, Nothing<T>>,
+}
+
+impl<T, PE> ZeroOrOne<T, PE>
+where
+    PE: PatternEvaluatorMut<Item = T>,
+{
+    pub fn new(pe: PE) -> Self {
+        Self {
+            ty: std::marker::PhantomData,
+            pe: Alternation::new(pe, Nothing::new()),
+        }
+    }
+}
+
+impl<T, PE> PatternEvaluatorMut for ZeroOrOne<T, PE>
+where
+    PE: PatternEvaluatorMut<Item = T>,
+{
+    type Item = T;
+
+    fn initial_state_mut(&mut self) {
+        self.pe.initial_state_mut()
+    }
+
+    fn is_in_accept_state(&self) -> bool {
+        self.pe.is_in_accept_state()
+    }
+
+    fn advance_mut<'a>(&mut self, next: &'a Self::Item) -> Option<&'a Self::Item> {
+        self.pe.advance_mut(next)
     }
 }
 

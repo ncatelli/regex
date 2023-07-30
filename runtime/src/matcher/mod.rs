@@ -48,6 +48,7 @@ pub trait PatternEvaluatorMut: Sized {
 /// nothing.initial_state_mut();
 /// assert!(!nothing.matches("a".chars()));
 /// ```
+#[derive(Debug, Clone)]
 pub struct Nothing<T> {
     ty: std::marker::PhantomData<T>,
     is_in_final_state: bool,
@@ -106,6 +107,7 @@ impl<T> Default for Nothing<T> {
 /// any_char.initial_state_mut();
 /// assert!(!any_char.matches("ab".chars()));
 /// ```
+#[derive(Debug, Clone)]
 pub struct Any<T> {
     ty: std::marker::PhantomData<T>,
     in_initial_state: bool,
@@ -173,6 +175,7 @@ impl<T> Default for Any<T> {
 /// literal_char.initial_state_mut();
 /// assert!(!literal_char.matches("ab".chars()));
 /// ```
+#[derive(Debug, Clone)]
 pub struct Literal<T> {
     literal: T,
     in_initial_state: bool,
@@ -227,6 +230,7 @@ impl<T: Eq> PatternEvaluatorMut for Literal<T> {
 /// assert!(concat.matches("ab".chars()));
 /// assert!(concat.is_in_accept_state());
 /// ```
+#[derive(Debug, Clone)]
 pub struct Concatenation<T, PE1, PE2> {
     ty: std::marker::PhantomData<T>,
     pe1: PE1,
@@ -308,6 +312,7 @@ where
 /// assert!(!alt.matches("c".chars()));
 /// assert!(!alt.is_in_accept_state());
 /// ```
+#[derive(Debug, Clone)]
 pub struct Alternation<T, PE1, PE2> {
     ty: std::marker::PhantomData<T>,
     pe1: PE1,
@@ -379,6 +384,7 @@ where
 /// assert!(zero_or_one.matches("a".chars()));
 /// assert!(zero_or_one.is_in_accept_state());
 /// ```
+#[derive(Debug, Clone)]
 pub struct ZeroOrOne<T, PE> {
     ty: std::marker::PhantomData<T>,
     pe: Alternation<T, PE, Nothing<T>>,
@@ -412,6 +418,73 @@ where
 
     fn advance_mut<'a>(&mut self, next: &'a Self::Item) -> Option<&'a Self::Item> {
         self.pe.advance_mut(next)
+    }
+}
+
+/// Matches either zero or one instance of a sub-matcher.
+///
+/// # Examples
+///
+/// ```
+/// use regex_runtime::matcher::*;
+///
+/// let literal_a = Literal::new('a');
+/// let mut zero_or_more = ZeroOrMore::new(literal_a).initial_state();
+///
+/// // matches one
+/// assert!(zero_or_more.matches("a".chars()));
+/// assert!(zero_or_more.is_in_accept_state());
+///
+/// // matches zero
+/// zero_or_more.initial_state_mut();
+/// assert!(zero_or_more.matches("".chars()));
+/// assert!(zero_or_more.is_in_accept_state());
+///
+/// // matches many
+/// zero_or_more.initial_state_mut();
+/// assert!(zero_or_more.matches("aaa".chars()));
+/// assert!(zero_or_more.is_in_accept_state());
+/// ```
+#[derive(Debug, Clone)]
+pub struct ZeroOrMore<T, PE> {
+    ty: std::marker::PhantomData<T>,
+    pe: PE,
+}
+
+impl<T, PE> ZeroOrMore<T, PE>
+where
+    PE: PatternEvaluatorMut<Item = T>,
+{
+    pub fn new(pe: PE) -> Self {
+        Self {
+            ty: std::marker::PhantomData,
+            pe,
+        }
+    }
+}
+
+impl<T, PE> PatternEvaluatorMut for ZeroOrMore<T, PE>
+where
+    PE: PatternEvaluatorMut<Item = T>,
+{
+    type Item = T;
+
+    fn initial_state_mut(&mut self) {
+        self.pe.initial_state_mut();
+    }
+
+    fn is_in_accept_state(&self) -> bool {
+        true
+    }
+
+    fn advance_mut<'a>(&mut self, next: &'a Self::Item) -> Option<&'a Self::Item> {
+        let advanced = self.pe.advance_mut(next);
+
+        if advanced.is_some() && self.is_in_accept_state() {
+            advanced
+        } else {
+            None
+        }
     }
 }
 

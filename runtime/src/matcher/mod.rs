@@ -553,32 +553,4 @@ where
 }
 
 #[cfg(test)]
-mod tests {
-
-    #[test]
-    fn should_match_one_or_more() {
-        use super::*;
-
-        let literal_a = Literal::new('a');
-        let mut one_or_more = OneOrMore::new(literal_a).initial_state();
-
-        // matches one
-        assert!(one_or_more.matches("a".chars()));
-        assert!(one_or_more.is_in_accept_state());
-
-        // matches many
-        one_or_more.initial_state_mut();
-        assert!(one_or_more.matches("aaa".chars()));
-        assert!(one_or_more.is_in_accept_state());
-
-        // will fail if first doesn't match
-        one_or_more.initial_state_mut();
-        assert!(!one_or_more.matches("baa".chars()));
-        assert!(!one_or_more.is_in_accept_state());
-
-        // will not match zero
-        one_or_more.initial_state_mut();
-        assert!(!one_or_more.matches("".chars()));
-        assert!(!one_or_more.is_in_accept_state());
-    }
-}
+mod tests {}

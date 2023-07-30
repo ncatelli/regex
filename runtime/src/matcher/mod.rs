@@ -22,11 +22,16 @@ pub trait PatternEvaluatorMut: Sized {
     where
         I: Iterator<Item = Self::Item>,
     {
-        iter.fold(self.is_in_accept_state(), |_, item| {
-            self.advance_mut(&item);
+        let mut accepted = self.is_in_accept_state();
+        for item in iter {
+            let advanced = self.advance_mut(&item);
+            accepted = self.is_in_accept_state();
+            if advanced.is_none() {
+                break;
+            }
+        }
 
-            self.is_in_accept_state()
-        })
+        accepted
     }
 }
 
@@ -492,15 +497,20 @@ where
 /// assert!(one_or_more.matches("a".chars()));
 /// assert!(one_or_more.is_in_accept_state());
 ///
-/// // will not match zero
-/// one_or_more.initial_state_mut();
-/// assert!(!one_or_more.matches("b".chars()));
-/// assert!(!one_or_more.is_in_accept_state());
-///
 /// // matches many
 /// one_or_more.initial_state_mut();
 /// assert!(one_or_more.matches("aaa".chars()));
 /// assert!(one_or_more.is_in_accept_state());
+///
+/// // will fail if first doesn't match
+/// one_or_more.initial_state_mut();
+/// assert!(!one_or_more.matches("baa".chars()));
+/// assert!(!one_or_more.is_in_accept_state());
+///
+/// // will not match zero
+/// one_or_more.initial_state_mut();
+/// assert!(!one_or_more.matches("".chars()));
+/// assert!(!one_or_more.is_in_accept_state());
 /// ```
 #[derive(Debug, Clone)]
 pub struct OneOrMore<T, PE> {
@@ -543,4 +553,32 @@ where
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+
+    #[test]
+    fn should_match_one_or_more() {
+        use super::*;
+
+        let literal_a = Literal::new('a');
+        let mut one_or_more = OneOrMore::new(literal_a).initial_state();
+
+        // matches one
+        assert!(one_or_more.matches("a".chars()));
+        assert!(one_or_more.is_in_accept_state());
+
+        // matches many
+        one_or_more.initial_state_mut();
+        assert!(one_or_more.matches("aaa".chars()));
+        assert!(one_or_more.is_in_accept_state());
+
+        // will fail if first doesn't match
+        one_or_more.initial_state_mut();
+        assert!(!one_or_more.matches("baa".chars()));
+        assert!(!one_or_more.is_in_accept_state());
+
+        // will not match zero
+        one_or_more.initial_state_mut();
+        assert!(!one_or_more.matches("".chars()));
+        assert!(!one_or_more.is_in_accept_state());
+    }
+}

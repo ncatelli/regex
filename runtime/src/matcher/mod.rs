@@ -111,7 +111,6 @@ impl<T> Default for Nothing<T> {
 pub struct Any<T> {
     ty: std::marker::PhantomData<T>,
     in_initial_state: bool,
-    is_in_final_state: bool,
 }
 
 impl<T> Any<T> {
@@ -120,7 +119,6 @@ impl<T> Any<T> {
         Self {
             ty: std::marker::PhantomData,
             in_initial_state: true,
-            is_in_final_state: false,
         }
     }
 }
@@ -134,14 +132,13 @@ impl<T: Eq> PatternEvaluatorMut for Any<T> {
     }
 
     fn is_in_accept_state(&self) -> bool {
-        self.is_in_final_state
+        !self.in_initial_state
     }
 
     fn advance_mut<'a>(&mut self, next: &'a Self::Item) -> Option<&'a Self::Item> {
-        self.is_in_final_state = self.in_initial_state;
-        self.in_initial_state = !self.is_in_final_state;
+        self.in_initial_state = !self.in_initial_state;
 
-        self.is_in_final_state.then_some(next)
+        (!self.in_initial_state).then_some(next)
     }
 }
 
@@ -179,7 +176,6 @@ impl<T> Default for Any<T> {
 pub struct Literal<T> {
     literal: T,
     in_initial_state: bool,
-    is_in_final_state: bool,
 }
 
 impl<T> Literal<T> {
@@ -188,7 +184,6 @@ impl<T> Literal<T> {
         Self {
             literal,
             in_initial_state: true,
-            is_in_final_state: false,
         }
     }
 }
@@ -202,16 +197,15 @@ impl<T: Eq> PatternEvaluatorMut for Literal<T> {
     }
 
     fn is_in_accept_state(&self) -> bool {
-        self.is_in_final_state
+        !self.in_initial_state
     }
 
     fn advance_mut<'a>(&mut self, next: &'a Self::Item) -> Option<&'a Self::Item> {
         let next_matches_literal = next == &self.literal;
 
-        self.is_in_final_state = self.in_initial_state && next_matches_literal;
-        self.in_initial_state = !self.is_in_final_state;
+        self.in_initial_state = !(self.in_initial_state && next_matches_literal);
 
-        self.is_in_final_state.then_some(next)
+        (!self.in_initial_state).then_some(next)
     }
 }
 
@@ -264,17 +258,13 @@ where
     fn initial_state_mut(&mut self) {
         // clear the acceptor state if set and set as in initial state.
         self.pe1.initial_state_mut();
+        self.pe2.initial_state_mut();
 
-        let pe1_in_accept_state = self.pe1.is_in_accept_state();
-        self.pe2_started = pe1_in_accept_state;
-
-        if self.pe2_started {
-            self.pe2.initial_state_mut();
-        }
+        self.pe2_started = self.pe1.is_in_accept_state();
     }
 
     fn is_in_accept_state(&self) -> bool {
-        self.pe2.is_in_accept_state()
+        self.pe1.is_in_accept_state() && self.pe2.is_in_accept_state()
     }
 
     fn advance_mut<'a>(&mut self, next: &'a Self::Item) -> Option<&'a Self::Item> {
@@ -485,6 +475,70 @@ where
         } else {
             None
         }
+    }
+}
+
+/// Matches either zero or more instance of a sub-matcher.
+///
+/// # Examples
+///
+/// ```
+/// use regex_runtime::matcher::*;
+///
+/// let literal_a = Literal::new('a');
+/// let mut one_or_more = OneOrMore::new(literal_a).initial_state();
+///
+/// // matches one
+/// assert!(one_or_more.matches("a".chars()));
+/// assert!(one_or_more.is_in_accept_state());
+///
+/// // will not match zero
+/// one_or_more.initial_state_mut();
+/// assert!(!one_or_more.matches("b".chars()));
+/// assert!(!one_or_more.is_in_accept_state());
+///
+/// // matches many
+/// one_or_more.initial_state_mut();
+/// assert!(one_or_more.matches("aaa".chars()));
+/// assert!(one_or_more.is_in_accept_state());
+/// ```
+#[derive(Debug, Clone)]
+pub struct OneOrMore<T, PE> {
+    ty: std::marker::PhantomData<T>,
+    pe: Concatenation<T, PE, ZeroOrMore<T, PE>>,
+}
+
+impl<T, PE> OneOrMore<T, PE>
+where
+    PE: PatternEvaluatorMut<Item = T> + Clone,
+{
+    pub fn new(pe: PE) -> Self {
+        Self {
+            ty: std::marker::PhantomData,
+            pe: Concatenation::new(
+                pe.clone().initial_state(),
+                ZeroOrMore::new(pe).initial_state(),
+            ),
+        }
+    }
+}
+
+impl<T, PE> PatternEvaluatorMut for OneOrMore<T, PE>
+where
+    PE: PatternEvaluatorMut<Item = T>,
+{
+    type Item = T;
+
+    fn initial_state_mut(&mut self) {
+        self.pe.initial_state_mut();
+    }
+
+    fn is_in_accept_state(&self) -> bool {
+        self.pe.is_in_accept_state()
+    }
+
+    fn advance_mut<'a>(&mut self, next: &'a Self::Item) -> Option<&'a Self::Item> {
+        self.pe.advance_mut(next)
     }
 }
 

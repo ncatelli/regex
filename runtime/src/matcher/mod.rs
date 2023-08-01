@@ -273,8 +273,13 @@ where
     }
 
     fn advance_mut<'a>(&mut self, next: &'a Self::Item) -> Option<&'a Self::Item> {
-        if self.pe2_started {
-            self.pe2.advance_mut(next)
+        let pe2_started_and_advanced = self
+            .pe2_started
+            .then_some(())
+            .and_then(|_| self.pe2.advance_mut(next));
+
+        if pe2_started_and_advanced.is_some() {
+            pe2_started_and_advanced
         } else {
             let pe1_advanced = self.pe1.advance_mut(next);
             self.pe2_started = self.pe1.is_in_accept_state();
@@ -476,6 +481,8 @@ where
         let advanced = self.pe.advance_mut(next);
 
         if advanced.is_some() && self.is_in_accept_state() {
+            // reset the matcher after an accept state
+            self.pe.initial_state_mut();
             advanced
         } else {
             None
@@ -553,4 +560,19 @@ where
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::*;
+
+    #[test]
+    fn should_match_unanchored_expression() {
+        let unanchored = ZeroOrMore::new(Any::new());
+        let literal = Literal::new('b');
+
+        // equivalent to `b` expression
+        let mut expr = Concatenation::new(unanchored, literal).initial_state();
+
+        expr.initial_state_mut();
+        assert!(expr.matches("aab".chars()));
+        assert!(expr.is_in_accept_state())
+    }
+}

@@ -1,5 +1,5 @@
 pub trait PatternEvaluatorMut: Sized {
-    /// The input interable type to be compared.
+    /// The input iterable type to be compared.
     type Item;
 
     fn initial_state(mut self) -> Self {
@@ -17,13 +17,30 @@ pub trait PatternEvaluatorMut: Sized {
     /// Attempts to advance to the next state, returning an [Option] signifying
     /// the success of that advance.
     fn advance_mut<'a>(&mut self, next: &'a Self::Item) -> Option<&'a Self::Item>;
+}
+
+pub trait PatternEvaluatorMutExt: Sized {
+    /// The input type to be compared.
+    type Item;
 
     fn matches<I>(&mut self, iter: I) -> bool
     where
-        I: Iterator<Item = Self::Item>,
+        I: IntoIterator<Item = Self::Item>;
+}
+
+impl<T> PatternEvaluatorMutExt for T
+where
+    T: PatternEvaluatorMut,
+{
+    type Item = <T as PatternEvaluatorMut>::Item;
+
+    fn matches<I>(&mut self, iter: I) -> bool
+    where
+        I: IntoIterator<Item = Self::Item>,
     {
         let mut accepted = self.is_in_accept_state();
-        for item in iter {
+
+        for item in iter.into_iter() {
             let advanced = self.advance_mut(&item);
             accepted = self.is_in_accept_state();
             if advanced.is_none() {

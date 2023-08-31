@@ -97,12 +97,6 @@ impl From<SaveGroup> for SaveGroupSlot {
     }
 }
 
-impl Default for SaveGroupSlot {
-    fn default() -> Self {
-        SaveGroupSlot::None
-    }
-}
-
 /// Represents a Save Group as tracked on an open thread.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SaveGroup {

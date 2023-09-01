@@ -34,11 +34,11 @@
 //! }
 //! ```
 
-use collections_ext::set::sparse::SparseSet;
 use std::fmt::{Debug, Display};
 
 pub mod bytecode;
 pub use bytecode::from_binary;
+mod sparse_set;
 
 /// Represents a defined match group for a pattern.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -196,13 +196,13 @@ impl<const SG: usize> Thread<SG> {
 /// Stores all active threads and a set representing the evaluation generation.
 #[derive(Debug)]
 struct Threads<const SG: usize> {
-    gen: SparseSet,
+    gen: sparse_set::SparseSet,
     threads: Vec<Thread<SG>>,
 }
 
 impl<const SG: usize> Threads<SG> {
     pub fn with_set_size(set_capacity: usize) -> Self {
-        let ops = SparseSet::new(set_capacity);
+        let ops = sparse_set::SparseSet::new(set_capacity);
         Self {
             threads: vec![],
             gen: ops,
@@ -212,7 +212,7 @@ impl<const SG: usize> Threads<SG> {
 
 impl<const SG: usize> Default for Threads<SG> {
     fn default() -> Self {
-        let ops = SparseSet::new(0);
+        let ops = sparse_set::SparseSet::new(0);
         Self {
             threads: vec![],
             gen: ops,

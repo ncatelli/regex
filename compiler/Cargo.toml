@@ -6,7 +6,7 @@ edition = "2021"
 workspace = ".."
 
 [dev-dependencies]
-criterion = "0.4"
+criterion = "0.5"
 
 [[bench]]
 name = "linear_scaling_of_input"

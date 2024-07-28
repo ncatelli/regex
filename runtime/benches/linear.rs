@@ -47,7 +47,7 @@ pub fn linear_input_size_comparison(c: &mut Criterion) {
                         let res = run::<1>(&prog, input);
                         assert_eq!(
                             Some(Some(&expected_res)),
-                            res.as_ref().map(|slots| slots.get(0))
+                            res.as_ref().map(|slots| slots.first())
                         )
                     })
                 },
@@ -87,7 +87,7 @@ pub fn linear_input_size_comparison_with_fast_forward(c: &mut Criterion) {
                         let res = run::<1>(&prog, input);
                         assert_eq!(
                             Some(Some(&expected_res)),
-                            res.as_ref().map(|slots| slots.get(0))
+                            res.as_ref().map(|slots| slots.first())
                         )
                     })
                 },

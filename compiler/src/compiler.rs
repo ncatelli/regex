@@ -145,11 +145,11 @@ pub fn compile(regex_ast: ast::Regex) -> Result<Instructions, String> {
         ast::Regex::StartOfStringAnchored(expr) => (
             true,
             expression(&mut save_group_id_counter, expr)
-                .map(|expr| expr.into_iter().chain(suffix.into_iter()).collect()),
+                .map(|opcodes| opcodes.into_iter().chain(suffix).collect()),
         ),
         ast::Regex::Unanchored(expr) => (
             false,
-            expression(&mut save_group_id_counter, expr).map(|expr| {
+            expression(&mut save_group_id_counter, expr).map(|opcodes| {
                 // match anything
                 let prefix = [
                     RelativeOpcode::Split(3, 1),
@@ -157,11 +157,7 @@ pub fn compile(regex_ast: ast::Regex) -> Result<Instructions, String> {
                     RelativeOpcode::Jmp(-2),
                 ];
 
-                prefix
-                    .into_iter()
-                    .chain(expr.into_iter())
-                    .chain(suffix.into_iter())
-                    .collect()
+                prefix.into_iter().chain(opcodes).chain(suffix).collect()
             }),
         ),
     };
@@ -344,10 +340,10 @@ pub fn compile_many(regex_asts: Vec<ast::Regex>) -> Result<Instructions, String>
 
     let joined_opcodes = anchored_prefix
         .into_iter()
-        .chain(anchored_expr_splits.into_iter())
+        .chain(anchored_expr_splits)
         .chain(anchored.into_iter().flatten())
-        .chain(unanchored_prefix.into_iter())
-        .chain(unanchored_expr_splits.into_iter())
+        .chain(unanchored_prefix)
+        .chain(unanchored_expr_splits)
         .chain(unanchored.into_iter().flatten())
         .collect::<Vec<_>>();
 
@@ -1020,7 +1016,7 @@ fn alternations_for_supplied_relative_opcodes(
 
     let compiled_ops_with_applied_alternations = rel_ops
         .into_iter()
-        .zip(start_end_offsets_by_subexpr.into_iter())
+        .zip(start_end_offsets_by_subexpr)
         .enumerate()
         .map(|(idx, (opcodes, (start, end)))| {
             // unwraps should be safe as these should never be able to
@@ -1041,8 +1037,8 @@ fn alternations_for_supplied_relative_opcodes(
             Some((start_of_next_subexpr_offset, end_of_expr_offset)) => {
                 [RelativeOpcode::Split(1, start_of_next_subexpr_offset)]
                     .into_iter()
-                    .chain(ops.into_iter())
-                    .chain([RelativeOpcode::Jmp(end_of_expr_offset)].into_iter())
+                    .chain(ops)
+                    .chain([RelativeOpcode::Jmp(end_of_expr_offset)])
                     .collect()
             }
             None => ops,
@@ -1067,8 +1063,8 @@ fn group(save_group_id_offset: &mut usize, g: ast::Group) -> Result<RelativeOpco
             expression(save_group_id_offset, expr).map(|insts| {
                 save_group_prefix
                     .into_iter()
-                    .chain(insts.into_iter())
-                    .chain(save_group_suffix.into_iter())
+                    .chain(insts)
+                    .chain(save_group_suffix)
                     .collect()
             })
         }
@@ -1125,8 +1121,8 @@ fn group(save_group_id_offset: &mut usize, g: ast::Group) -> Result<RelativeOpco
                 .map(|insts: RelativeOpcodes| {
                     save_group_prefix
                         .into_iter()
-                        .chain(insts.into_iter())
-                        .chain(save_group_suffix.into_iter())
+                        .chain(insts)
+                        .chain(save_group_suffix)
                         .collect()
                 })
         }

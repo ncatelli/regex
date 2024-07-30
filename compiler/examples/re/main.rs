@@ -19,7 +19,7 @@ fn main() -> Result<(), String> {
 
     let (pattern, input) = match arg_len {
         1 => args
-            .get(0)
+            .first()
             .map(|pattern| (pattern.as_str(), io::stdin()))
             .ok_or_else(|| USAGE.to_string()),
         _ => Err(USAGE.to_string()),

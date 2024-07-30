@@ -108,7 +108,7 @@ impl ToBytecode for Instructions {
 
         header
             .into_iter()
-            .chain(set_bytes.into_iter())
+            .chain(set_bytes)
             .chain(instruction_bytes)
             .collect()
     }
@@ -209,7 +209,7 @@ impl ToBytecode for CharacterSet {
 
         char_set_header
             .into_iter()
-            .chain(entries.into_iter())
+            .chain(entries)
             .chain([0u8].into_iter().cycle().take(padding))
             .collect()
     }
